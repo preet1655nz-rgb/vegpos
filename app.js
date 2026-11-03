@@ -78,7 +78,7 @@ const PAY = { cash: 'Cash', card: 'Card', online: 'Online' };
 const REASON = { order: 'Order', order_edit: 'Order edited', order_cancel: 'Order cancelled', order_restore: 'Order restored', restock: 'Restock', waste: 'Waste', correction: 'Correction', set: 'Set', initial: 'Opening stock' };
 const S = {
   session: null, me: null, started: false, recovery: false,
-  products: [], orders: [], moves: [], staff: [], settings: { business_name: 'VegPOS', low_stock_default: 10 },
+  products: [], pools: [], orders: [], moves: [], staff: [], settings: { business_name: 'VegPOS', low_stock_default: 10 },
   tab: 'orders', live: 'connecting',
   of: { seg: 'active', q: '', date: '' }, inv: { seg: 'all', q: '', mode: 'items' }, ins: { range: 'today', from: '', to: '' },
   cart: null, cat: 'All', sheet: null
@@ -91,7 +91,17 @@ S.cart = newCart();
 const isOwner = () => S.me && S.me.role === 'owner';
 const prodById = id => S.products.find(p => p.id === id);
 const threshold = p => (p.low_stock_threshold ?? S.settings.low_stock_default ?? 10);
-const isLow = p => !p.archived && p.stock <= threshold(p);
+/* shared stock pools (stock_items): products with stock_item_id draw from one pooled level */
+const poolById = id => S.pools.find(s => s.id === id);
+const poolOf = p => (p && p.stock_item_id ? poolById(p.stock_item_id) : null) || null;
+const fac = p => Number(p && p.stock_factor) || 1;
+const poolThr = s => s.low_stock_threshold ?? S.settings.low_stock_default ?? 10;
+const poolLow = s => !s.archived && s.stock <= poolThr(s);
+const poolUsers = s => S.products.filter(p => p.stock_item_id === s.id && !p.archived);
+const effStock = p => { const s = poolOf(p); return s ? Math.floor(s.stock / fac(p)) : p.stock; };
+const isLow = p => !p.archived && (poolOf(p) ? poolLow(poolOf(p)) : p.stock <= threshold(p));
+/* low-stock count with each shared pool counted once */
+const lowCount = () => S.products.filter(p => !p.stock_item_id && isLow(p)).length + S.pools.filter(s => poolLow(s) && poolUsers(s).length).length;
 const isActive = o => ['pending', 'preparing', 'ready'].includes(o.status);
 const itemsCount = o => (o.items || []).reduce((a, i) => a + (Number(i.qty) || 0), 0);
 const itemsText = o => (o.items || []).map(i => `${i.qty}× ${i.name}${i.variant ? ' ' + i.variant : ''}`).join(', ');
@@ -207,18 +217,19 @@ async function authSubmit(form) {
 /* ---------- data ---------- */
 async function q(p) { const { data, error } = await p; if (error) throw error; return data; }
 async function loadAll() {
-  const [products, orders, moves, settings, staff] = await Promise.all([
+  const [products, orders, moves, settings, staff, pools] = await Promise.all([
     q(sb.from('products').select('*').order('sort_order').order('product_no')),
     q(sb.from('orders').select('*').order('pickup_time', { ascending: false }).limit(5000)),
     q(sb.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(400)),
     q(sb.from('settings').select('*').eq('id', 1).maybeSingle()),
-    q(sb.from('staff').select('*').order('created_at'))
+    q(sb.from('staff').select('*').order('created_at')),
+    q(sb.from('stock_items').select('*').order('sort_order').order('name'))
   ]);
-  Object.assign(S, { products, orders, moves, staff }); if (settings) S.settings = settings;
+  Object.assign(S, { products, orders, moves, staff, pools }); if (settings) S.settings = settings;
   S.me = staff.find(s => s.email === (S.session?.user?.email || '').toLowerCase()) || null;
 }
-const KEY = { orders: 'id', products: 'id', stock_movements: 'id', staff: 'email', settings: 'id' };
-const LIST = { orders: 'orders', products: 'products', stock_movements: 'moves', staff: 'staff' };
+const KEY = { orders: 'id', products: 'id', stock_movements: 'id', staff: 'email', settings: 'id', stock_items: 'id' };
+const LIST = { orders: 'orders', products: 'products', stock_movements: 'moves', staff: 'staff', stock_items: 'pools' };
 function applyRow(table, row, del) {
   if (table === 'settings') { if (!del && row) S.settings = row; return; }
   const k = KEY[table], arr = S[LIST[table]], i = arr.findIndex(x => x[k] === row[k]);
@@ -232,9 +243,13 @@ function applyRow(table, row, del) {
 function onChange(p) {
   const del = p.eventType === 'DELETE';
   applyRow(p.table, del ? p.old : p.new, del);
+  // one transaction can update a shared pool row several times (e.g. Steamed + Fried in one order); re-read the pools so the level is always the committed one
+  if (['stock_movements', 'stock_items', 'orders'].includes(p.table)) refreshPools();
   if (p.table === 'staff' && del && S.session && p.old.email === S.session.user.email.toLowerCase()) { S.me = null; return showAuth('notstaff'); }
   rerender();
 }
+let poolT;
+function refreshPools() { clearTimeout(poolT); poolT = setTimeout(async () => { if (!S.started) return; const { data } = await sb.from('stock_items').select('*').order('sort_order').order('name'); if (data) { S.pools = data; rerender(); } }, 350); }
 function setLive(s) {
   const was = S.live; S.live = s;
   document.querySelectorAll('.live').forEach(el => { el.className = 'live ' + (s === 'ok' ? 'ok' : s === 'bad' ? 'bad' : ''); el.lastChild.textContent = s === 'ok' ? 'Live' : s === 'bad' ? 'Offline' : 'Connecting'; });
@@ -244,7 +259,7 @@ const liveHTML = () => `<span class="live ${S.live === 'ok' ? 'ok' : S.live === 
 function subscribe() {
   if (S.ch) sb.removeChannel(S.ch);
   let ch = sb.channel('vegpos-live');
-  for (const t of ['orders', 'products', 'stock_movements', 'settings', 'staff']) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, onChange);
+  for (const t of ['orders', 'products', 'stock_items', 'stock_movements', 'settings', 'staff']) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, onChange);
   S.ch = ch.subscribe(st => {
     setLive(st === 'SUBSCRIBED' ? 'ok' : ['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(st) ? 'bad' : 'connecting');
     // Realtime starts streaming a moment after SUBSCRIBED; re-read once so nothing written in that gap is missed.
@@ -268,7 +283,7 @@ function stop() { S.started = false; S.me = null; if (S.ch) { sb.removeChannel(S
 const TABS = [['orders', 'Orders', 'orders'], ['new', 'New Order', 'plusc'], ['inventory', 'Inventory', 'box'], ['insights', 'Insights', 'chart'], ['settings', 'Settings', 'sliders']];
 function renderTabbar() {
   const overdue = S.orders.filter(o => isActive(o) && relMins(o.pickup_time) < 0).length;
-  const low = S.products.filter(p => isLow(p)).length;
+  const low = lowCount();
   const badge = { orders: overdue, inventory: low };
   $('tabbar').innerHTML = `<div class="side-brand">${esc(S.settings.business_name)}<small>${esc(S.me?.name || S.me?.email || '')}</small></div>` +
     TABS.map(([k, l, ic]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-a="go" data-t="${k}" aria-label="${l}">${icon(ic)}<span>${l}</span>${badge[k] ? `<span class="badge">${badge[k]}</span>` : ''}</button>`).join('');
@@ -451,7 +466,11 @@ const cartTotal = () => r2(cartSub() - cartDisc());
 const cartCount = () => S.cart.items.reduce((a, i) => a + i.qty, 0);
 function cartPieces(pid) { return S.cart.items.filter(i => i.productId === pid).reduce((a, i) => a + i.pieces * i.qty, 0); }
 function origPieces(pid) { const o = S.cart.id && S.orders.find(x => x.id === S.cart.id); return o && o.status !== 'cancelled' ? (o.items || []).filter(i => i.productId === pid).reduce((a, i) => a + (i.pieces || 0) * (i.qty || 0), 0) : 0; }
-function availPieces(p) { return p.stock + origPieces(p.id) - cartPieces(p.id); }
+function availPieces(p) {
+  const s = poolOf(p); if (!s) return p.stock + origPieces(p.id) - cartPieces(p.id);
+  const used = S.products.filter(x => x.stock_item_id === s.id).reduce((a, x) => a + (cartPieces(x.id) - origPieces(x.id)) * fac(x), 0);
+  return Math.floor((s.stock - used) / fac(p));
+}
 function renderMenu() {
   const c = S.cart, editing = !!c.id;
   $('n-head').innerHTML = header(editing ? `Edit #${c.no}` : 'New Order', 'Tap a size to add it to the order.', c.items.length ? `<button class="btn plain" data-a="clearCart">${editing ? 'Discard' : 'Clear'}</button>` : '');
@@ -463,8 +482,8 @@ function renderMenu() {
   $('n-cats').innerHTML = cats.map(k => `<button class="${S.cat === k ? 'on' : ''}" data-a="cat" data-k="${esc(k)}">${esc(k)}</button>`).join('');
   const shown = prods.filter(p => S.cat === 'All' || (p.category || 'Menu') === S.cat);
   $('n-grid').innerHTML = shown.length ? shown.map(p => {
-    const av = availPieces(p), cls = av <= 0 ? 'out' : p.stock <= threshold(p) ? 'low' : '';
-    return `<div class="mcard"><h4>${esc(p.name)}</h4><div class="stockline ${cls}"><i></i>${av <= 0 ? 'Out of stock' : `${num(av)} pcs available`}</div>
+    const av = availPieces(p), pl = poolOf(p), cls = av <= 0 ? 'out' : isLow(p) ? 'low' : '';
+    return `<div class="mcard"><h4>${esc(p.name)}</h4><div class="stockline ${cls}"><i></i>${av <= 0 ? (pl ? `${esc(pl.name)} out of stock` : 'Out of stock') : pl ? `${num(av)} pcs · ${esc(pl.name)}` : `${num(av)} pcs available`}</div>
       <div class="vars">${(p.variants || []).map((v, vi) => { const ln = c.items.find(i => i.productId === p.id && i.variantIndex === vi);
         return `<button class="var ${ln ? 'in' : ''}" data-a="addVar" data-p="${p.id}" data-v="${vi}"><span>${ln ? `<span class="q">${ln.qty}</span>` : ''}${esc(v.label)}</span><b>${money(v.price)}</b></button>`; }).join('')}</div></div>`;
   }).join('') : `<div class="empty" style="grid-column:1/-1">${icon('box')}<b>No items on the menu</b>Add items in Inventory, or switch them on.</div>`;
@@ -539,6 +558,7 @@ async function placeOrder(btn) {
   S.cart = newCart(); if (S.sheet) closeSheet();
   S.of.seg = 'active'; go('orders');
   sb.from('products').select('*').then(({ data }) => { if (data) { S.products = data.sort((a, b) => (a.sort_order - b.sort_order) || (a.product_no - b.product_no)); rerender(); } });
+  sb.from('stock_items').select('*').order('sort_order').order('name').then(({ data }) => { if (data) { S.pools = data; rerender(); } });
 }
 function editOrder(id) {
   const o = S.orders.find(x => x.id === id); if (!o) return; if (o.locked) { toast('This order is locked', true); return; }
@@ -552,14 +572,15 @@ function editOrder(id) {
 /* ---------- Inventory ---------- */
 const varSummary = p => (p.variants || []).map(v => `${v.label} ${money(v.price)}`).join(' · ');
 function renderInventory() {
-  const live = S.products.filter(p => !p.archived), low = live.filter(isLow);
-  $('i-head').innerHTML = header('Inventory', `${live.length} items · ${low.length ? `<span style="color:var(--red)">${low.length} low on stock</span>` : 'stock levels healthy'}`,
+  const live = S.products.filter(p => !p.archived), lowN = lowCount();
+  const lowNames = [...S.pools.filter(s => poolLow(s) && poolUsers(s).length).map(s => s.name), ...live.filter(p => !p.stock_item_id && isLow(p)).map(p => p.name)];
+  $('i-head').innerHTML = header('Inventory', `${live.length} items · ${lowN ? `<span style="color:var(--red)">${lowN} low on stock</span>` : 'stock levels healthy'}`,
     `<button class="btn primary sm" data-a="newItem">${icon('plus', 'xs')} Add item</button>`);
   const wk = Date.now() - 7 * 864e5;
-  const recent = S.moves.filter(m => new Date(m.created_at).getTime() >= wk);
+  const recent = S.moves.filter(m => new Date(m.created_at).getTime() >= wk && !/^ZZTEST/.test(m.note || '')); // agent test rows are kept (no deletes) but not counted
   $('i-stats').innerHTML = [
     ['On menu', num(live.filter(p => p.active).length), `${live.filter(p => !p.active).length} hidden`],
-    ['Low stock', num(low.length), low.length ? esc(low.slice(0, 2).map(p => p.name).join(', ')) : 'All good'],
+    ['Low stock', num(lowN), lowN ? esc(lowNames.slice(0, 2).join(', ')) : 'All good'],
     ['Restocked · 7d', num(recent.filter(m => m.reason === 'restock').reduce((a, m) => a + m.delta, 0)), 'pieces added'],
     ['Waste · 7d', num(-recent.filter(m => m.reason === 'waste').reduce((a, m) => a + m.delta, 0)), 'pieces written off']
   ].map(([k, v, d]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div><div class="d">${d}</div></div>`).join('');
@@ -579,63 +600,127 @@ function renderInvList() {
     return;
   }
   const qq = S.inv.q.trim().toLowerCase(), k = S.inv.seg;
+  const pools = S.pools.filter(s => (k === 'archived' ? s.archived : !s.archived && (k !== 'low' || poolLow(s)) && k !== 'hidden')
+    && (!qq || `${s.name} ${poolUsers(s).map(p => p.name).join(' ')}`.toLowerCase().includes(qq)));
+  const poolHTML = pools.length ? `<div class="day-h"><span>Shared stock</span><button class="btn plain sm" data-a="newPool">${icon('plus', 'xs')} New</button></div><div class="list pools">${pools.map(s => { const us = poolUsers(s);
+    return `<div class="row inv-row pool-row"><button class="inv-main" data-a="openPool" data-id="${s.id}"><span class="pool-ic">${icon('box', 'sm')}</span><div class="grow"><div class="t">${esc(s.name)}</div>
+      <div class="s">${us.length ? 'Used by ' + esc(us.map(p => p.name).join(' & ')) : 'Not linked to any item yet'}</div>${s.archived ? '<div class="o-meta"><span class="chip tag-muted">Archived</span></div>' : ''}</div>
+      <span class="stockpill ${poolLow(s) ? 'low' : 'ok'}">${num(s.stock)}<small> ${esc(s.unit || 'pcs')}</small></span></button>
+      <button class="btn sm edit-btn" data-a="editPool" data-id="${s.id}" aria-label="Edit ${esc(s.name)}">${icon('edit', 'xs')} Edit</button></div>`; }).join('')}</div>` : '';
   const list = S.products.filter(p => (k === 'all' ? !p.archived : k === 'low' ? isLow(p) : k === 'hidden' ? !p.active && !p.archived : p.archived) && (!qq || `${p.name} ${p.category}`.toLowerCase().includes(qq)));
-  if (!list.length) { $('i-list').innerHTML = `<div class="empty">${icon('box')}<b>Nothing here</b>${k === 'all' && !qq ? 'Add your first item to start tracking stock.' : 'Try another filter.'}</div>`; return; }
+  if (!list.length) { $('i-list').innerHTML = poolHTML + `<div class="empty">${icon('box')}<b>Nothing here</b>${k === 'all' && !qq ? 'Add your first item to start tracking stock.' : 'Try another filter.'}</div>`; return; }
   const groups = new Map(); for (const p of list) { const c = p.category || 'Menu'; if (!groups.has(c)) groups.set(c, []); groups.get(c).push(p); }
-  let h = ''; for (const [c, ps] of groups) h += `<div class="day-h"><span>${esc(c)}</span><span>${ps.length}</span></div><div class="list">${ps.map(p => `
-    <button class="row" data-a="openItem" data-id="${p.id}"><div class="grow"><div class="t">${esc(p.name)}</div><div class="s">${esc(varSummary(p))}</div>
-      ${!p.active || p.archived ? `<div class="o-meta">${p.archived ? '<span class="chip tag-muted">Archived</span>' : '<span class="chip tag-muted">Hidden from menu</span>'}</div>` : ''}</div>
-      <span class="stockpill ${isLow(p) ? 'low' : 'ok'}">${num(p.stock)}</span><span class="chev">${icon('chev', 'sm')}</span></button>`).join('')}</div>`;
+  let h = poolHTML; for (const [c, ps] of groups) h += `<div class="day-h"><span>${esc(c)}</span><span>${ps.length}</span></div><div class="list">${ps.map(p => { const pl = poolOf(p);
+    return `<div class="row inv-row"><button class="inv-main" data-a="openItem" data-id="${p.id}"><div class="grow"><div class="t">${esc(p.name)}</div><div class="s">${esc(varSummary(p))}</div>
+      ${pl || !p.active || p.archived ? `<div class="o-meta">${pl ? `<span class="chip tag-shared">${icon('box', 'xs')} Uses ${esc(pl.name)}</span>` : ''}${p.archived ? '<span class="chip tag-muted">Archived</span>' : !p.active ? '<span class="chip tag-muted">Hidden from menu</span>' : ''}</div>` : ''}</div>
+      <span class="stockpill ${isLow(p) ? 'low' : 'ok'} ${pl ? 'shared' : ''}">${num(effStock(p))}</span></button>
+      <button class="btn sm edit-btn" data-a="editItem" data-id="${p.id}" aria-label="Edit ${esc(p.name)}">${icon('edit', 'xs')} Edit</button></div>`; }).join('')}</div>`;
   $('i-list').innerHTML = h;
 }
 function moveRow(m) {
-  return `<div class="row static"><div class="grow"><div class="t">${esc(m.product_name)}</div>
+  const title = m.stock_item_name ? (m.product_id ? `${esc(m.stock_item_name)} <span class="muted small">via ${esc(m.product_name)}</span>` : esc(m.stock_item_name)) : esc(m.product_name);
+  return `<div class="row static"><div class="grow"><div class="t">${title}</div>
     <div class="s">${REASON[m.reason] || m.reason}${m.order_no ? ` #${m.order_no}` : ''}${m.note ? ' · ' + esc(m.note) : ''} · ${fmtDT(m.created_at)}${m.created_by ? ' · ' + esc(m.created_by.split('@')[0]) : ''}</div></div>
     <div class="end"><div class="mv-delta ${m.delta > 0 ? 'pos' : 'neg'}">${m.delta > 0 ? '+' : '−'}${num(Math.abs(m.delta))}</div><div class="s small num">→ ${m.stock_after ?? ''}</div></div></div>`;
 }
-/* stock adjust sheet */
-function itemBody(p) {
-  const a = S.adj, mode = a.mode;
-  const amt = parseInt(a.amt, 10);
-  const preview = Number.isFinite(amt) ? (mode === 'add' ? p.stock + amt : mode === 'remove' ? p.stock - amt : amt) : null;
-  const hist = S.moves.filter(m => m.product_id === p.id).slice(0, 8);
-  return `<div class="bigstock" id="adj-big"><b>${num(p.stock)}</b><div>pieces in stock · alert at ${threshold(p)}${preview !== null ? ` · after: <b class="num">${num(preview)}</b>` : ''}</div></div>
+/* stock adjust sheet — target is a product (own stock) or a shared pool; linked products adjust their pool */
+function adjT() {
+  const a = S.adj; if (!a) return null;
+  if (a.kind === 'pool') { const s = poolById(a.id); return s && { kind: 'pool', pool: s, name: s.name, stock: s.stock, thr: poolThr(s), unit: s.unit || 'pcs',
+    hist: S.moves.filter(m => m.stock_item_id === s.id) }; }
+  const p = prodById(a.id); if (!p) return null; const s = poolOf(p);
+  return s ? { kind: 'pool', pool: s, p, name: p.name, stock: s.stock, thr: poolThr(s), unit: s.unit || 'pcs', hist: S.moves.filter(m => m.stock_item_id === s.id) }
+    : { kind: 'product', p, name: p.name, stock: p.stock, thr: threshold(p), unit: 'pcs', hist: S.moves.filter(m => m.product_id === p.id) };
+}
+function adjLine(t) {
+  const n = parseInt(S.adj.amt, 10), m = S.adj.mode;
+  const pv = Number.isFinite(n) ? (m === 'add' ? t.stock + n : m === 'remove' ? t.stock - n : n) : null;
+  return `${esc(t.unit)} ${t.pool ? 'in ' + esc(t.pool.name) : 'in stock'} · alert at ${t.thr}${pv !== null ? ` · after: <b class="num">${num(pv)}</b>` : ''}`;
+}
+function itemBody() {
+  const t = adjT(), a = S.adj, mode = a.mode; if (!t) return '';
+  const p = t.p, s = t.pool;
+  const shared = s ? `<div class="shared-note">${icon('box', 'sm')}<div class="grow">${p ? `<b>${esc(p.name)}</b> uses the shared <b>${esc(s.name)}</b> stock.` : `<b>Shared stock</b>`}
+      <div class="s">Used by ${esc(poolUsers(s).map(x => x.name).join(' & ') || 'no items yet')}. Orders for any of them deduct here.</div></div></div>` : '';
+  return `${shared}<div class="bigstock" id="adj-big"><b>${num(t.stock)}</b><div>${adjLine(t)}</div></div>
     <div class="seg mt">${[['add', 'Add'], ['remove', 'Remove'], ['set', 'Set to']].map(([k, l]) => `<button class="${mode === k ? 'on' : ''}" data-a="adjMode" data-k="${k}">${l}</button>`).join('')}</div>
     <div class="qty-input"><button class="iconbtn" data-a="adjStep" data-d="-1" aria-label="Less">${icon('minus')}</button>
       <input data-j="amt" inputmode="numeric" pattern="[0-9]*" value="${esc(a.amt)}" placeholder="0" aria-label="Amount"><button class="iconbtn" data-a="adjStep" data-d="1" aria-label="More">${icon('plus')}</button></div>
     <div class="quick">${(mode === 'set' ? [0, 24, 48, 96] : [8, 16, 24, 48]).map(n => `<button class="btn sm" data-a="adjQuick" data-n="${n}">${mode === 'set' ? n : (mode === 'add' ? '+' : '−') + n}</button>`).join('')}</div>
     <div class="form-h">Reason</div><div class="seg">${['restock', 'waste', 'correction'].map(k => `<button class="${a.reason === k ? 'on' : ''}" data-a="adjReason" data-k="${k}">${REASON[k]}</button>`).join('')}</div>
     <div class="form mt"><div class="field"><label>Note</label><input data-j="note" value="${esc(a.note)}" placeholder="Optional" maxlength="120"></div></div>
+    <p class="form-note">Every change is logged in stock history with its reason.</p>
     <div class="list mt">
-      <div class="row static"><div class="grow t">Show on menu</div><label class="switch"><input type="checkbox" data-a="toggleActive" data-id="${p.id}" ${p.active ? 'checked' : ''}><span></span></label></div>
-      <button class="row" data-a="editItem" data-id="${p.id}"><div class="grow t">Edit name, sizes & prices</div><span class="chev">${icon('chev', 'sm')}</span></button></div>
-    <div class="form-h">Recent changes</div>${hist.length ? `<div class="list">${hist.map(moveRow).join('')}</div>` : '<p class="muted small" style="padding:0 16px">No changes logged yet.</p>'}`;
+      ${p ? `<div class="row static"><div class="grow t">Show on menu</div><label class="switch"><input type="checkbox" data-a="toggleActive" data-id="${p.id}" ${p.active ? 'checked' : ''}><span></span></label></div>
+      <button class="row" data-a="editItem" data-id="${p.id}"><span class="row-ic">${icon('edit', 'sm')}</span><div class="grow t">Edit name, sizes & prices</div><span class="chev">${icon('chev', 'sm')}</span></button>` : ''}
+      ${s ? `<button class="row" data-a="${p ? 'openPool' : 'editPool'}" data-id="${s.id}"><span class="row-ic">${icon('box', 'sm')}</span><div class="grow t">${p ? `Open ${esc(s.name)}` : `Edit ${esc(s.name)}`}</div><span class="chev">${icon('chev', 'sm')}</span></button>` : ''}</div>
+    <div class="form-h">Recent changes</div>${t.hist.length ? `<div class="list">${t.hist.slice(0, 8).map(moveRow).join('')}</div>` : '<p class="muted small" style="padding:0 20px">No changes logged yet.</p>'}`;
 }
 function itemFoot() {
   const a = S.adj, n = parseInt(a.amt, 10), ok = Number.isFinite(n) && n >= 0 && (a.mode === 'set' || n > 0);
   const l = !ok ? 'Enter an amount' : a.mode === 'add' ? `Add ${n} pcs` : a.mode === 'remove' ? `Remove ${n} pcs` : `Set stock to ${n}`;
   return `<button class="btn primary lg block" data-a="applyAdj" ${ok ? '' : 'disabled'}>${l}</button>`;
 }
-function openItem(id) {
-  const p = prodById(id); if (!p) return;
-  S.adj = { pid: id, mode: 'add', amt: '', reason: 'restock', note: '' };
-  openSheet({ title: p.name, key: 'item:' + id, body: itemBody(p), foot: itemFoot(),
-    refresh() { const x = prodById(id); if (!x) return closeSheet(); $('sheet-body').innerHTML = itemBody(x); $('sheet-foot').innerHTML = itemFoot(); $('sheet-title').textContent = x.name; } });
+function openAdj(kind, id) {
+  S.adj = { kind, id, mode: 'add', amt: '', reason: 'restock', note: '' };
+  const t = adjT(); if (!t) return;
+  const editBtn = kind === 'pool' ? `<button class="btn plain" data-a="editPool" data-id="${id}" style="font-weight:700">Edit</button>` : `<button class="btn plain" data-a="editItem" data-id="${id}" style="font-weight:700">Edit</button>`;
+  openSheet({ title: t.name, key: (kind === 'pool' ? 'pool:' : 'item:') + id, body: itemBody(), foot: itemFoot(), right: editBtn,
+    refresh() { const x = adjT(); if (!x) return closeSheet(); $('sheet-body').innerHTML = itemBody(); $('sheet-foot').innerHTML = itemFoot(); $('sheet-title').textContent = x.name; } });
 }
+function openItem(id) { if (prodById(id)) openAdj('product', id); }
+function openPool(id) { if (poolById(id)) openAdj('pool', id); }
 function adjRefresh() { const st = $('sheet-body').scrollTop; S.sheet.refresh(); $('sheet-body').scrollTop = st; }
 async function applyAdj(btn) {
-  const a = S.adj, p = prodById(a.pid), n = parseInt(a.amt, 10); if (!p || !Number.isFinite(n)) return;
-  const v = await busy(btn, () => a.mode === 'set' ? rpc('set_stock', { p_product_id: p.id, p_value: n, p_reason: a.reason, p_note: a.note || null })
-    : rpc('adjust_stock', { p_product_id: p.id, p_delta: a.mode === 'add' ? n : -n, p_reason: a.reason, p_note: a.note || null }));
-  p.stock = v; buzz(); toast(`${p.name}: ${num(v)} pcs in stock`);
+  const a = S.adj, t = adjT(), n = parseInt(a.amt, 10); if (!t || !Number.isFinite(n)) return;
+  const d = a.mode === 'add' ? n : -n, note = a.note || null;
+  const v = await busy(btn, () => t.pool
+    ? (a.mode === 'set' ? rpc('set_stock_item', { p_stock_item_id: t.pool.id, p_value: n, p_reason: a.reason, p_note: note }) : rpc('adjust_stock_item', { p_stock_item_id: t.pool.id, p_delta: d, p_reason: a.reason, p_note: note }))
+    : (a.mode === 'set' ? rpc('set_stock', { p_product_id: t.p.id, p_value: n, p_reason: a.reason, p_note: note }) : rpc('adjust_stock', { p_product_id: t.p.id, p_delta: d, p_reason: a.reason, p_note: note })));
+  if (t.pool) t.pool.stock = v; else t.p.stock = v;
+  buzz(); toast(`${t.pool ? t.pool.name : t.name}: ${num(v)} pcs in stock`);
   S.adj.amt = ''; S.adj.note = ''; adjRefresh(); rerender();
 }
 function adjPreview() {
-  const p = prodById(S.adj.pid), el = $('adj-big'); if (!p || !el) return;
-  const n = parseInt(S.adj.amt, 10), m = S.adj.mode;
-  const pv = Number.isFinite(n) ? (m === 'add' ? p.stock + n : m === 'remove' ? p.stock - n : n) : null;
-  el.querySelector('div').innerHTML = `pieces in stock · alert at ${threshold(p)}${pv !== null ? ` · after: <b class="num">${num(pv)}</b>` : ''}`;
+  const t = adjT(), el = $('adj-big'); if (!t || !el) return;
+  el.querySelector('div').innerHTML = adjLine(t);
   $('sheet-foot').innerHTML = itemFoot();
+}
+
+/* shared stock editor (name, unit, alert, archive) — never deleted */
+function poolEdBody() {
+  const e = S.ped, s = e.id && poolById(e.id), us = s ? poolUsers(s) : [];
+  return `<div class="form"><div class="field"><label>Name</label><input data-pe="name" value="${esc(e.name)}" placeholder="e.g. Frozen Momos" maxlength="60"></div>
+    <div class="field"><label>Unit</label><input data-pe="unit" value="${esc(e.unit)}" placeholder="pcs" maxlength="12"></div>
+    <div class="field"><label>Low-stock alert</label><input data-pe="low" inputmode="numeric" value="${esc(e.low)}" placeholder="Default (${S.settings.low_stock_default})"></div>
+    ${e.id ? '' : `<div class="field"><label>Opening stock</label><input data-pe="stock" inputmode="numeric" value="${esc(e.stock)}" placeholder="0"></div>`}</div>
+    ${e.id ? `<div class="form mt"><div class="field"><label>Archived</label><span style="flex:1"></span><label class="switch"><input type="checkbox" data-pe="archived" ${e.archived ? 'checked' : ''}><span></span></label></div></div>` : ''}
+    <div class="form-h">Used by</div>${us.length ? `<div class="list">${us.map(p => `<button class="row" data-a="editItem" data-id="${p.id}"><div class="grow"><div class="t">${esc(p.name)}</div><div class="s">${esc(varSummary(p))}</div></div><span class="chev">${icon('chev', 'sm')}</span></button>`).join('')}</div>`
+      : '<p class="muted small" style="padding:0 20px">No items yet. Open an item’s Edit sheet and choose this under “Stock source”.</p>'}
+    <p class="form-note">Stock levels change only through Add / Remove / Set with a reason, so every change is logged. Shared stock is never deleted — archive it instead.</p>`;
+}
+function openPoolEditor(id) {
+  const s = id && poolById(id);
+  S.ped = s ? { id, name: s.name, unit: s.unit || 'pcs', low: s.low_stock_threshold ?? '', archived: s.archived } : { id: null, name: '', unit: 'pcs', low: '', archived: false, stock: '' };
+  openSheet({ title: s ? 'Edit shared stock' : 'New shared stock', key: 'pooled', left: s ? `<button class="btn plain" data-a="openPool" data-id="${id}">Cancel</button>` : undefined,
+    right: `<button class="btn plain" data-a="savePool" style="font-weight:700">Save</button>`, body: poolEdBody(),
+    foot: `<button class="btn primary lg block" data-a="savePool">${s ? 'Save changes' : 'Create shared stock'}</button>` });
+}
+async function savePool(btn) {
+  const e = S.ped, name = e.name.trim(); if (!name) return toast('Give the shared stock a name', true);
+  const low = String(e.low).trim() === '' ? null : parseInt(e.low, 10);
+  if (low !== null && !(low >= 0)) return toast('Low-stock alert must be 0 or more', true);
+  if (S.pools.some(s => s.id !== e.id && s.name.toLowerCase() === name.toLowerCase())) return toast('That name is already used', true);
+  const row = { name, unit: e.unit.trim() || 'pcs', low_stock_threshold: low, archived: !!e.archived };
+  await busy(btn, async () => {
+    if (e.id) { const r = await q(sb.from('stock_items').update(row).eq('id', e.id).select().single()); applyRow('stock_items', r); toast('Shared stock saved'); openPool(e.id); }
+    else {
+      const r = await q(sb.from('stock_items').insert({ ...row, stock: 0, sort_order: S.pools.length + 1 }).select().single()); applyRow('stock_items', r);
+      const st = parseInt(e.stock, 10); if (st > 0) r.stock = await rpc('adjust_stock_item', { p_stock_item_id: r.id, p_delta: st, p_reason: 'initial', p_note: null });
+      toast(`${name} created`); openPool(r.id);
+    }
+  });
+  rerender();
 }
 
 /* item editor */
@@ -650,21 +735,24 @@ function editorBody() {
         <input data-e="v:${i}:price" value="${esc(v.price)}" inputmode="decimal" placeholder="10" aria-label="Price">
         <input data-e="v:${i}:pieces" value="${esc(v.pieces)}" inputmode="numeric" placeholder="1" aria-label="Pieces">
         <input data-e="v:${i}:cost" value="${esc(v.cost)}" inputmode="decimal" placeholder="opt." aria-label="Cost">
-        <button class="iconbtn" style="width:36px;height:36px;color:var(--red)" data-a="rmVariant" data-i="${i}" aria-label="Remove size" ${e.variants.length < 2 ? 'disabled' : ''}>${icon('minus', 'sm')}</button></div>`).join('')}
+        <button class="iconbtn" style="width:44px;height:44px;color:var(--red)" data-a="rmVariant" data-i="${i}" aria-label="Remove size" ${e.variants.length < 2 ? 'disabled' : ''}>${icon('minus', 'sm')}</button></div>`).join('')}
       <button class="row" data-a="addVariant" style="color:var(--accent-ink)">${icon('plus', 'sm')}<span class="grow t">Add size</span></button></div>
     <p class="form-note">Pieces = how many stock pieces one sale uses (e.g. 8pcs uses 8). Cost is optional and powers profit estimates.</p>
     <div class="form-h">Stock</div><div class="form">
-      <div class="field"><label>Low-stock alert</label><input data-e="low" inputmode="numeric" value="${esc(e.low)}" placeholder="Default (${S.settings.low_stock_default})"></div>
-      ${e.id ? '' : `<div class="field"><label>Opening stock</label><input data-e="stock" inputmode="numeric" value="${esc(e.stock)}" placeholder="0"></div>`}</div>
+      <div class="field"><label>Stock source</label><select data-e="pool" aria-label="Stock source"><option value="" ${e.pool ? '' : 'selected'}>Own stock</option>${S.pools.filter(s => !s.archived || s.id === e.pool).map(s => `<option value="${s.id}" ${e.pool === s.id ? 'selected' : ''}>Shared: ${esc(s.name)} (${num(s.stock)} ${esc(s.unit || 'pcs')})</option>`).join('')}</select></div>
+      ${e.pool ? '' : `<div class="field"><label>Low-stock alert</label><input data-e="low" inputmode="numeric" value="${esc(e.low)}" placeholder="Default (${S.settings.low_stock_default})"></div>`}
+      ${e.id || e.pool ? '' : `<div class="field"><label>Opening stock</label><input data-e="stock" inputmode="numeric" value="${esc(e.stock)}" placeholder="0"></div>`}</div>
+    <p class="form-note">${e.pool ? 'Sales of this item deduct pieces from the shared stock. Its alert level is set on the shared stock.' : 'Shared stock lets several items draw from one level (e.g. Steamed and Fried momos share Frozen Momos).'} <a href="#" data-a="newPool">New shared stock</a></p>
+    ${e.id ? `<div class="list mt"><button class="row" data-a="${e.pool ? 'openPool' : 'openItem'}" data-id="${e.pool || e.id}"><span class="row-ic">${icon('box', 'sm')}</span><div class="grow"><div class="t">Correct stock level</div><div class="s">Add, remove or set with a reason — logged in history</div></div><span class="chev">${icon('chev', 'sm')}</span></button></div>` : ''}
     <div class="form mt"><div class="field"><label>Show on menu</label><span style="flex:1"></span><label class="switch"><input type="checkbox" data-e="active" ${e.active ? 'checked' : ''}><span></span></label></div>
       ${e.id ? `<div class="field"><label>Archived</label><span style="flex:1"></span><label class="switch"><input type="checkbox" data-e="archived" ${e.archived ? 'checked' : ''}><span></span></label></div>` : ''}</div>
     ${e.id ? `<p class="form-note">Items are never deleted. Archive an item to hide it everywhere while keeping it for past orders, stock history and reports.</p>` : ''}`;
 }
 function openEditor(id) {
   const p = id && prodById(id);
-  S.ed = p ? { id, name: p.name, category: p.category || '', low: p.low_stock_threshold ?? '', active: p.active, archived: p.archived,
+  S.ed = p ? { id, name: p.name, category: p.category || '', low: p.low_stock_threshold ?? '', active: p.active, archived: p.archived, pool: p.stock_item_id || '',
     variants: (p.variants || []).map(v => ({ label: v.label || '', price: String(v.price ?? ''), pieces: String(v.pieces ?? 1), cost: v.cost != null ? String(v.cost) : '' })) }
-    : { id: null, name: '', category: S.cat !== 'All' ? S.cat : '', low: '', active: true, archived: false, stock: '', variants: [{ label: '', price: '', pieces: '1', cost: '' }] };
+    : { id: null, name: '', category: S.cat !== 'All' ? S.cat : '', low: '', active: true, archived: false, stock: '', pool: '', variants: [{ label: '', price: '', pieces: '1', cost: '' }] };
   if (!S.ed.variants.length) S.ed.variants.push({ label: '', price: '', pieces: '1', cost: '' });
   openSheet({ title: p ? 'Edit item' : 'New item', key: 'editor',
     left: p ? `<button class="btn plain" data-a="openItem" data-id="${id}">Cancel</button>` : undefined,
@@ -687,13 +775,15 @@ async function saveItem(btn) {
   if (!vs.length) return toast('Add at least one size with a price', true);
   const low = String(e.low).trim() === '' ? null : parseInt(e.low, 10);
   if (low !== null && !(low >= 0)) return toast('Low-stock alert must be 0 or more', true);
-  const row = { name, category: e.category.trim() || 'Menu', variants: vs, low_stock_threshold: low, active: !!e.active, archived: !!e.archived };
+  const row = { name, category: e.category.trim() || 'Menu', variants: vs, low_stock_threshold: low, active: !!e.active, archived: !!e.archived, stock_item_id: e.pool || null };
+  const cur = e.id && prodById(e.id);
+  if (cur && (cur.stock_item_id || '') !== (e.pool || '') && !confirm(e.pool ? `Switch ${name} to the shared stock? Its own stock count (${num(cur.stock)}) is kept but no longer used.` : `Switch ${name} back to its own stock (${num(cur.stock)})?`)) return;
   await busy(btn, async () => {
     if (e.id) { const r = await q(sb.from('products').update(row).eq('id', e.id).select().single()); applyRow('products', r); toast('Item saved'); openItem(e.id); }
     else {
       const so = S.products.reduce((m, p) => Math.max(m, p.sort_order || 0), 0) + 1;
       const r = await q(sb.from('products').insert({ ...row, stock: 0, sort_order: so }).select().single()); applyRow('products', r);
-      const st = parseInt(e.stock, 10); if (st > 0) { r.stock = await rpc('adjust_stock', { p_product_id: r.id, p_delta: st, p_reason: 'initial', p_note: null }); }
+      const st = parseInt(e.stock, 10); if (st > 0 && !e.pool) { r.stock = await rpc('adjust_stock', { p_product_id: r.id, p_delta: st, p_reason: 'initial', p_note: null }); }
       toast(`${name} added`); closeSheet();
     }
   });
@@ -856,6 +946,7 @@ const A = {
     document.querySelectorAll('[data-c=date]').forEach(i => i.value = S.cart.date); document.querySelectorAll('[data-c=time]').forEach(i => i.value = S.cart.time); buzz(); },
   invMode: el => { S.inv.mode = el.dataset.k; renderInventory(); }, invSeg: el => { S.inv.seg = el.dataset.k; renderInventory(); },
   openItem: el => openItem(el.dataset.id), newItem: () => openEditor(null), editItem: el => openEditor(el.dataset.id),
+  openPool: el => openPool(el.dataset.id), editPool: el => openPoolEditor(el.dataset.id), newPool: () => openPoolEditor(null), savePool: el => savePool(el).catch(() => { }),
   adjMode: el => { S.adj.mode = el.dataset.k; S.adj.reason = { add: 'restock', remove: 'waste', set: 'correction' }[el.dataset.k]; adjRefresh(); },
   adjStep: el => { S.adj.amt = String(Math.max(0, (parseInt(S.adj.amt, 10) || 0) + +el.dataset.d)); const i = document.querySelector('[data-j=amt]'); if (i) i.value = S.adj.amt; adjPreview(); },
   adjQuick: el => { S.adj.amt = el.dataset.n; const i = document.querySelector('[data-j=amt]'); if (i) i.value = S.adj.amt; adjPreview(); buzz(); },
@@ -898,7 +989,8 @@ document.addEventListener('input', e => {
   const t = e.target, d = t.dataset, val = t.type === 'checkbox' ? t.checked : t.value;
   if (d.c) { S.cart[d.c] = val; if (d.c === 'discount') updateCartTotals(); }
   else if (d.j) { S.adj[d.j] = val; if (d.j === 'amt') adjPreview(); }
-  else if (d.e) { if (d.e.startsWith('v:')) { const [, i, f] = d.e.split(':'); S.ed.variants[+i][f] = val; } else S.ed[d.e] = val; }
+  else if (d.pe) { S.ped[d.pe] = val; }
+  else if (d.e) { if (d.e === 'pool') { S.ed.pool = val; const st = $('sheet-body').scrollTop; $('sheet-body').innerHTML = editorBody(); $('sheet-body').scrollTop = st; return; } if (d.e.startsWith('v:')) { const [, i, f] = d.e.split(':'); S.ed.variants[+i][f] = val; } else S.ed[d.e] = val; }
 });
 document.addEventListener('submit', e => { if (e.target.id === 'a-form') { e.preventDefault(); authSubmit(e.target); } });
 $('backdrop').addEventListener('click', closeSheet);

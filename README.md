@@ -21,3 +21,20 @@ The schema changes are in `supabase/migrations/`. Stock updates and order totals
 - **Nothing is deleted:** orders, items and stock history can't be deleted from the app or by any signed-in user. Cancel an order or archive an item instead. Database triggers also block DELETE and TRUNCATE for everyone except database admins running migrations.
 - **Audit log:** every insert, update and delete on orders, items, stock history, staff and settings is recorded in `audit_log`, with the old row, the new row, who made the change and when. The log is append-only: nobody, not even the API service role, can edit or erase it.
 - **Locked orders:** a locked order (🔒) can still move through its status and have its payment marked, but its items, totals, customer, times and number can't change, and it can't be cancelled. Only the owner can unlock it, from the order detail screen. The 7 orders imported from the old app are locked.
+
+## v4 — shared stock, item editing, spacious UI
+
+**Shared stock pools.** `stock_items` holds a pooled stock level (e.g. *Frozen Momos*, in pieces). A product links to a pool with
+`products.stock_item_id` (+ `stock_factor`, pool pieces per product piece, default 1). Veg Momos Steamed and Veg Momos Fried both
+draw from Frozen Momos: a 12pcs ×2 order deducts 24 from the pool. Deduction on order create/edit and restore on cancel happen
+inside the existing atomic DB functions (`save_order`, `set_order_status` → `private.apply_stock`), so it is one transaction with a
+row-locked update. Every change is a `stock_movements` row carrying `stock_item_id` / `stock_item_name`.
+Pool corrections go through `adjust_stock_item` / `set_stock_item` (restock / waste / correction + note). Pools follow the same
+rules as everything else: staff-only RLS, no DELETE/TRUNCATE (blocked by trigger), audited, realtime.
+Any future item can share stock: Inventory → item → **Edit** → *Stock source*.
+
+**Editing.** Every Inventory row has an **Edit** button (name, category, sizes, prices, pieces, cost, stock source, show on menu,
+archive). Stock corrections are never typed into the editor: they go through Add / Remove / Set with a reason, so they are logged.
+Items and pools are archived, never deleted.
+
+Migration: `supabase/migrations/20261103203000_vegpos_v4_shared_stock_items.sql` (applied as `vegpos_v4_shared_stock_items`, additive only).
