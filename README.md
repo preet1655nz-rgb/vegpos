@@ -38,3 +38,10 @@ archive). Stock corrections are never typed into the editor: they go through Add
 Items and pools are archived, never deleted.
 
 Migration: `supabase/migrations/20261103203000_vegpos_v4_shared_stock_items.sql` (applied as `vegpos_v4_shared_stock_items`, additive only).
+
+### v4.1 — inventory totals fix
+Inventory aggregates now use one entry per real stock source: each shared `stock_items` row is counted exactly once,
+and products linked to it never contribute their legacy `products.stock`. This covers Stock on hand (pieces + value when
+cost prices exist), Low / Out of stock counts, the header, the Low-stock filter and tab badge, and Restocked/Waste · 7d
+(which skip own-stock movements of now-linked products). Linked rows show "Uses <stock>: N pcs" and a "Shared" pill.
+No SQL change was needed: there are no views, and the stock functions route linked products to the shared row only.

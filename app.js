@@ -100,8 +100,26 @@ const poolLow = s => !s.archived && s.stock <= poolThr(s);
 const poolUsers = s => S.products.filter(p => p.stock_item_id === s.id && !p.archived);
 const effStock = p => { const s = poolOf(p); return s ? Math.floor(s.stock / fac(p)) : p.stock; };
 const isLow = p => !p.archived && (poolOf(p) ? poolLow(poolOf(p)) : p.stock <= threshold(p));
-/* low-stock count with each shared pool counted once */
-const lowCount = () => S.products.filter(p => !p.stock_item_id && isLow(p)).length + S.pools.filter(s => poolLow(s) && poolUsers(s).length).length;
+/* ---- inventory aggregates: one entry per real stock source ----
+   A shared stock_item is counted exactly once; products linked to it never contribute their own
+   (legacy, unused) products.stock. Unlinked products count as before. */
+const ppCost = p => { const c = (p.variants || []).filter(v => v.cost != null && Number(v.pieces) > 0).map(v => Number(v.cost) / Number(v.pieces)); return c.length ? c.reduce((a, b) => a + b, 0) / c.length : null; };
+function stockSources() {
+  const out = [];
+  for (const s of S.pools) { if (s.archived) continue; const us = poolUsers(s), cs = us.map(ppCost).filter(c => c != null);
+    out.push({ kind: 'pool', id: s.id, name: s.name, stock: Number(s.stock) || 0, thr: poolThr(s), alert: us.length > 0, cpp: cs.length ? cs.reduce((a, b) => a + b, 0) / cs.length : null }); }
+  for (const p of S.products) { if (p.archived || poolOf(p)) continue;
+    out.push({ kind: 'product', id: p.id, name: p.name, stock: Number(p.stock) || 0, thr: threshold(p), alert: true, cpp: ppCost(p) }); }
+  return out;
+}
+function invTotals() {
+  const src = stockSources(), al = src.filter(x => x.alert), low = al.filter(x => x.stock <= x.thr), out = al.filter(x => x.stock <= 0), costed = src.filter(x => x.cpp != null);
+  return { src, pieces: src.reduce((a, x) => a + Math.max(x.stock, 0), 0), low, out,
+    value: costed.length ? costed.reduce((a, x) => a + Math.max(x.stock, 0) * x.cpp, 0) : null, costed: costed.length };
+}
+const lowCount = () => invTotals().low.length;
+/* list filter "low": linked products are represented by their shared-stock row, so they are not repeated */
+const lowRow = p => !p.archived && !poolOf(p) && isLow(p);
 const isActive = o => ['pending', 'preparing', 'ready'].includes(o.status);
 const itemsCount = o => (o.items || []).reduce((a, i) => a + (Number(i.qty) || 0), 0);
 const itemsText = o => (o.items || []).map(i => `${i.qty}× ${i.name}${i.variant ? ' ' + i.variant : ''}`).join(', ');
@@ -572,15 +590,20 @@ function editOrder(id) {
 /* ---------- Inventory ---------- */
 const varSummary = p => (p.variants || []).map(v => `${v.label} ${money(v.price)}`).join(' · ');
 function renderInventory() {
-  const live = S.products.filter(p => !p.archived), lowN = lowCount();
-  const lowNames = [...S.pools.filter(s => poolLow(s) && poolUsers(s).length).map(s => s.name), ...live.filter(p => !p.stock_item_id && isLow(p)).map(p => p.name)];
+  const live = S.products.filter(p => !p.archived), T = invTotals(), lowN = T.low.length;
+  const lowNames = T.low.map(x => x.name), outNames = T.out.map(x => x.name);
   $('i-head').innerHTML = header('Inventory', `${live.length} items · ${lowN ? `<span style="color:var(--red)">${lowN} low on stock</span>` : 'stock levels healthy'}`,
     `<button class="btn primary sm" data-a="newItem">${icon('plus', 'xs')} Add item</button>`);
   const wk = Date.now() - 7 * 864e5;
-  const recent = S.moves.filter(m => new Date(m.created_at).getTime() >= wk && !/^ZZTEST/.test(m.note || '')); // agent test rows are kept (no deletes) but not counted
+  // agent test rows are kept (no deletes) but not counted; own-stock movements of products now linked to shared stock
+  // hit their legacy, unused products.stock, so they are excluded too (the shared stock's own movements are counted once)
+  const legacy = m => !m.stock_item_id && m.product_id && !!poolOf(prodById(m.product_id));
+  const recent = S.moves.filter(m => new Date(m.created_at).getTime() >= wk && !/^ZZTEST/.test(m.note || '') && !legacy(m));
   $('i-stats').innerHTML = [
-    ['On menu', num(live.filter(p => p.active).length), `${live.filter(p => !p.active).length} hidden`],
+    ['Stock on hand', `${num(T.pieces)}<small class="u"> pcs</small>`, T.value != null ? `Value ${money(T.value)}${T.costed < T.src.length ? ' (costed items)' : ''}` : `${T.src.length} stock sources · shared counted once`],
     ['Low stock', num(lowN), lowN ? esc(lowNames.slice(0, 2).join(', ')) : 'All good'],
+    ['Out of stock', num(T.out.length), T.out.length ? esc(outNames.slice(0, 2).join(', ')) : 'Nothing sold out'],
+    ['On menu', num(live.filter(p => p.active).length), `${live.filter(p => !p.active).length} hidden`],
     ['Restocked · 7d', num(recent.filter(m => m.reason === 'restock').reduce((a, m) => a + m.delta, 0)), 'pieces added'],
     ['Waste · 7d', num(-recent.filter(m => m.reason === 'waste').reduce((a, m) => a + m.delta, 0)), 'pieces written off']
   ].map(([k, v, d]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div><div class="d">${d}</div></div>`).join('');
@@ -588,7 +611,7 @@ function renderInventory() {
   if (S.inv.mode === 'items') {
     if (!$('i-q')) $('i-tools').innerHTML = `<div class="toolbar mt"><label class="search">${icon('search', 'sm')}<input id="i-q" type="search" placeholder="Search items" autocomplete="off"></label></div><div class="seg scroll" id="i-seg"></div>`;
     $('i-q').oninput = e => { S.inv.q = e.target.value; renderInvList(); }; if ($('i-q').value !== S.inv.q && document.activeElement !== $('i-q')) $('i-q').value = S.inv.q;
-    const c = k => S.products.filter(p => k === 'all' ? !p.archived : k === 'low' ? isLow(p) : k === 'hidden' ? !p.active && !p.archived : p.archived).length;
+    const c = k => k === 'low' ? lowN : S.products.filter(p => k === 'all' ? !p.archived : k === 'hidden' ? !p.active && !p.archived : p.archived).length;
     $('i-seg').innerHTML = [['all', 'All'], ['low', 'Low stock'], ['hidden', 'Hidden'], ['archived', 'Archived']].map(([k, l]) => `<button class="${S.inv.seg === k ? 'on' : ''}" data-a="invSeg" data-k="${k}">${l} <span class="muted num">${c(k)}</span></button>`).join('');
   } else $('i-tools').innerHTML = '<div style="height:12px"></div>';
   renderInvList();
@@ -600,20 +623,20 @@ function renderInvList() {
     return;
   }
   const qq = S.inv.q.trim().toLowerCase(), k = S.inv.seg;
-  const pools = S.pools.filter(s => (k === 'archived' ? s.archived : !s.archived && (k !== 'low' || poolLow(s)) && k !== 'hidden')
+  const pools = S.pools.filter(s => (k === 'archived' ? s.archived : !s.archived && (k !== 'low' || (poolLow(s) && poolUsers(s).length > 0)) && k !== 'hidden')
     && (!qq || `${s.name} ${poolUsers(s).map(p => p.name).join(' ')}`.toLowerCase().includes(qq)));
   const poolHTML = pools.length ? `<div class="day-h"><span>Shared stock</span><button class="btn plain sm" data-a="newPool">${icon('plus', 'xs')} New</button></div><div class="list pools">${pools.map(s => { const us = poolUsers(s);
     return `<div class="row inv-row pool-row"><button class="inv-main" data-a="openPool" data-id="${s.id}"><span class="pool-ic">${icon('box', 'sm')}</span><div class="grow"><div class="t">${esc(s.name)}</div>
       <div class="s">${us.length ? 'Used by ' + esc(us.map(p => p.name).join(' & ')) : 'Not linked to any item yet'}</div>${s.archived ? '<div class="o-meta"><span class="chip tag-muted">Archived</span></div>' : ''}</div>
       <span class="stockpill ${poolLow(s) ? 'low' : 'ok'}">${num(s.stock)}<small> ${esc(s.unit || 'pcs')}</small></span></button>
       <button class="btn sm edit-btn" data-a="editPool" data-id="${s.id}" aria-label="Edit ${esc(s.name)}">${icon('edit', 'xs')} Edit</button></div>`; }).join('')}</div>` : '';
-  const list = S.products.filter(p => (k === 'all' ? !p.archived : k === 'low' ? isLow(p) : k === 'hidden' ? !p.active && !p.archived : p.archived) && (!qq || `${p.name} ${p.category}`.toLowerCase().includes(qq)));
+  const list = S.products.filter(p => (k === 'all' ? !p.archived : k === 'low' ? lowRow(p) : k === 'hidden' ? !p.active && !p.archived : p.archived) && (!qq || `${p.name} ${p.category}`.toLowerCase().includes(qq)));
   if (!list.length) { $('i-list').innerHTML = poolHTML + `<div class="empty">${icon('box')}<b>Nothing here</b>${k === 'all' && !qq ? 'Add your first item to start tracking stock.' : 'Try another filter.'}</div>`; return; }
   const groups = new Map(); for (const p of list) { const c = p.category || 'Menu'; if (!groups.has(c)) groups.set(c, []); groups.get(c).push(p); }
   let h = poolHTML; for (const [c, ps] of groups) h += `<div class="day-h"><span>${esc(c)}</span><span>${ps.length}</span></div><div class="list">${ps.map(p => { const pl = poolOf(p);
     return `<div class="row inv-row"><button class="inv-main" data-a="openItem" data-id="${p.id}"><div class="grow"><div class="t">${esc(p.name)}</div><div class="s">${esc(varSummary(p))}</div>
-      ${pl || !p.active || p.archived ? `<div class="o-meta">${pl ? `<span class="chip tag-shared">${icon('box', 'xs')} Uses ${esc(pl.name)}</span>` : ''}${p.archived ? '<span class="chip tag-muted">Archived</span>' : !p.active ? '<span class="chip tag-muted">Hidden from menu</span>' : ''}</div>` : ''}</div>
-      <span class="stockpill ${isLow(p) ? 'low' : 'ok'} ${pl ? 'shared' : ''}">${num(effStock(p))}</span></button>
+      ${pl || !p.active || p.archived ? `<div class="o-meta">${pl ? `<span class="chip tag-shared ${pl.stock <= 0 ? 'out' : poolLow(pl) ? 'low' : ''}">${icon('box', 'xs')} Uses ${esc(pl.name)}: ${num(pl.stock)} ${esc(pl.unit || 'pcs')}</span>` : ''}${p.archived ? '<span class="chip tag-muted">Archived</span>' : !p.active ? '<span class="chip tag-muted">Hidden from menu</span>' : ''}</div>` : ''}</div>
+      ${pl ? `<span class="stockpill linked" title="Counted once under ${esc(pl.name)}">Shared</span>` : `<span class="stockpill ${isLow(p) ? 'low' : 'ok'}">${num(p.stock)}</span>`}</button>
       <button class="btn sm edit-btn" data-a="editItem" data-id="${p.id}" aria-label="Edit ${esc(p.name)}">${icon('edit', 'xs')} Edit</button></div>`; }).join('')}</div>`;
   $('i-list').innerHTML = h;
 }
