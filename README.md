@@ -1,9 +1,18 @@
 # VegPOS
 
-Order, kitchen and inventory app for VegPOS. It is a single `index.html` file with no build step, deployed on Vercel.
+Order-taking, sales and inventory app for VegPOS, styled like an iPhone app. It's a static site (`index.html`, `styles.css`, `app.js`) with no build step, deployed on Vercel and backed by Supabase.
 
-## Live sync
-All data (menu, prices, stock, orders) is stored in Supabase, so every phone or browser that opens the link sees the same data and updates instantly. The badge at the top shows **Live**, **Connecting…** or **Offline**. When offline, the app shows the last data this device saw, but changes can't be saved until it reconnects.
+## Features
+- **Orders**: take orders from a tap-to-add menu with size options. Each order has a customer name and phone, pickup date and time, notes, payment method, paid status and discount. You can also edit, search and filter orders (Active, Completed, Cancelled, by day). Orders show "due soon" and "overdue" badges and a status flow (Pending → Preparing → Ready → Completed). Cancelling an order puts its stock back. You can print a receipt for any order.
+- **Inventory**: stock levels with low-stock alerts (a threshold per item or a default). Adjust stock with a reason (restock, waste, correction, other) and see every stock movement in the history. You can add, edit, hide, archive and delete items, with categories, sizes or variants, prices, and optional cost.
+- **Insights**: Today, 7 days, 30 days or a custom range. Shows revenue, number of orders, average order and change vs the previous period. Includes charts of revenue over time, peak hours, top items and payment mix, plus CSV export of orders and line items.
+- **Settings**: business name, default low-stock level, staff management (owner only), sign out.
+- **Live sync**: every change appears on all signed-in devices within about a second (Supabase Realtime).
 
-## Security note
-There is no login yet: anyone who has the link can view and change orders, stock and the menu. Adding a staff login (Supabase Auth) is the recommended next step.
+## Staff login
+- **Sign-in**: only emails on the staff list can create an account or sign in (Supabase Auth plus row-level security). Visitors who aren't signed in can't read or change anything.
+- **First sign-in**: on the sign-in screen, tap **First time here? Create your password**. Enter your staff email and choose a password, then confirm via the email Supabase sends.
+- **Adding staff**: the owner adds staff in **Settings → Staff**.
+
+## Database
+The schema changes are in `supabase/migrations/`. Stock updates and order totals run in database functions (`save_order`, `set_order_status`, `adjust_stock`, `set_stock`) so they stay consistent across devices.
