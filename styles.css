@@ -536,3 +536,21 @@ body{background:radial-gradient(1200px 520px at 50% -180px,rgba(201,154,58,.10),
 .remember input:focus-visible+.box{outline:3px solid var(--gold-soft);outline-offset:2px}
 .remember b{display:block;font-weight:600;font-size:16px}
 .remember small{display:block;color:var(--text2);font-size:13.5px;margin-top:2px}
+
+/* ---------- new-order alert + Customer app badge ---------- */
+.chip.src-app{background:rgba(201,154,58,.16);color:var(--gold-ink,#8F6A1C);border:1px solid rgba(201,154,58,.45)}
+.chip.src-app svg{width:12px;height:12px}
+.neworder{position:fixed;left:50%;top:calc(10px + var(--sat,0px));z-index:95;width:min(560px,calc(100% - 20px));display:flex;align-items:stretch;gap:6px;
+  transform:translate(-50%,-160%);transition:transform .45s cubic-bezier(.2,.8,.2,1);background:var(--maroon,#7A1A28);color:#FFF6E6;border-radius:18px;
+  box-shadow:0 18px 40px -12px rgba(84,15,26,.55),0 0 0 1px rgba(255,255,255,.08) inset;padding:6px}
+.neworder.on{transform:translate(-50%,0)}
+.neworder.app{background:linear-gradient(135deg,var(--maroon,#7A1A28),var(--maroon-deep,#540F1A))}
+.neworder .no-main{flex:1;display:flex;align-items:center;gap:12px;min-height:56px;padding:6px 8px;border:0;background:none;color:inherit;text-align:left;font:inherit;cursor:pointer;border-radius:14px}
+.neworder .no-main:focus-visible,.neworder .no-x:focus-visible{outline:2px solid var(--gold,#C99A3A);outline-offset:2px}
+.neworder .no-ic{flex:none;display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:var(--gold,#C99A3A);color:#3A0A12;animation:noPulse 1.2s ease-in-out 3}
+.neworder b{display:block;font-size:15.5px;line-height:1.25}
+.neworder small{display:block;opacity:.85;font-size:13px;margin-top:2px}
+.neworder .no-view{flex:none;padding:8px 12px;border-radius:10px;background:rgba(255,246,230,.14);font-weight:700;font-size:13.5px}
+.neworder .no-x{flex:none;width:44px;min-height:44px;border:0;border-radius:12px;background:none;color:inherit;opacity:.75;cursor:pointer;display:grid;place-items:center}
+@keyframes noPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
+@media (prefers-reduced-motion:reduce){.neworder{transition:none}.neworder .no-ic{animation:none}}

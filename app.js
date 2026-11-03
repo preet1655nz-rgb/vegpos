@@ -285,11 +285,48 @@ function applyRow(table, row, del) {
 }
 function onChange(p) {
   const del = p.eventType === 'DELETE';
+  if (p.table === 'orders' && p.eventType === 'INSERT' && p.new) newOrderAlert(p.new);
   applyRow(p.table, del ? p.old : p.new, del);
   // one transaction can update a shared pool row several times (e.g. Steamed + Fried in one order); re-read the pools so the level is always the committed one
   if (['stock_movements', 'stock_items', 'orders'].includes(p.table)) refreshPools();
   if (p.table === 'staff' && del && S.session && p.old.email === S.session.user.email.toLowerCase()) { S.me = null; return showAuth('notstaff'); }
   rerender();
+}
+/* ---------- new-order alert (banner + chime + vibrate) ---------- */
+const isCustApp = o => o && o.created_by === 'customer-app';
+const custBadge = o => isCustApp(o) ? `<span class="chip src-app">${icon('orders', 'xs')}Customer app</span>` : '';
+const alerted = new Set();
+let audioCtx = null, alertT;
+function unlockAudio() {
+  try { if (!audioCtx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) audioCtx = new AC(); } if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) { }
+}
+['pointerdown', 'keydown', 'touchstart'].forEach(ev => document.addEventListener(ev, unlockAudio, { passive: true }));
+function chime() {
+  try {
+    unlockAudio(); const c = audioCtx; if (!c || c.state !== 'running') return;
+    const t0 = c.currentTime;
+    [[880, 0], [1318.5, 0.16], [1760, 0.32]].forEach(([f, d]) => {
+      const o = c.createOscillator(), g = c.createGain(); o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + d); g.gain.exponentialRampToValueAtTime(0.35, t0 + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.5);
+      o.connect(g).connect(c.destination); o.start(t0 + d); o.stop(t0 + d + 0.55);
+    });
+  } catch (e) { }
+}
+function newOrderAlert(o) {
+  if (!S.started || !o.id || alerted.has(o.id)) return; alerted.add(o.id);
+  // only live, fresh inserts: never on initial load / resync, and not for orders this device just entered itself
+  if (o.created_at && Date.now() - new Date(o.created_at).getTime() > 10 * 60000) return;
+  const mine = S.session && o.created_by && o.created_by.toLowerCase() === (S.session.user.email || '').toLowerCase();
+  if (mine) return;
+  let b = $('neworder');
+  if (!b) { b = document.createElement('div'); b.id = 'neworder'; b.className = 'neworder'; b.setAttribute('role', 'alert'); b.setAttribute('aria-live', 'assertive'); document.body.appendChild(b); }
+  b.innerHTML = `<button class="no-main" data-a="openOrder" data-id="${o.id}"><span class="no-ic">${icon('orders', 'sm')}</span><span class="grow"><b>New order #${o.order_no}${isCustApp(o) ? ' · Customer app' : ''}</b>
+    <small>${esc(o.customer_name || '')} · pickup ${fmtDT(o.pickup_time)} · ${money(o.total)}</small></span><span class="no-view">View</span></button>
+    <button class="no-x" data-a="dismissAlert" aria-label="Dismiss">${icon('xc', 'sm')}</button>`;
+  b.classList.toggle('app', isCustApp(o)); requestAnimationFrame(() => b.classList.add('on'));
+  clearTimeout(alertT); alertT = setTimeout(() => b.classList.remove('on'), 15000);
+  chime(); try { navigator.vibrate && navigator.vibrate([180, 90, 180]); } catch (e) { }
+  if (document.hidden) { const t0 = document.title; document.title = `● New order #${o.order_no}`; const back = () => { if (!document.hidden) { document.title = t0; document.removeEventListener('visibilitychange', back); } }; document.addEventListener('visibilitychange', back); }
 }
 let poolT;
 function refreshPools() { clearTimeout(poolT); poolT = setTimeout(async () => { if (!S.started) return; const { data } = await sb.from('stock_items').select('*').order('sort_order').order('name'); if (data) { S.pools = data; rerender(); } }, 350); }
@@ -399,7 +436,7 @@ function orderRow(o) {
       <div class="o-time"><b>${tm}</b><small>${ap || ''}</small></div>
       <div class="grow"><div class="t">${esc(o.customer_name)} <span class="muted small num">#${o.order_no}</span>${o.locked ? `<span class="lockmark" title="Locked" aria-label="Locked">${icon('lock', 'xs')}</span>` : ''}</div>
         <div class="s">${esc(itemsText(o))}</div>
-        <div class="o-meta">${chip(o.status)}${dueTag(o)}</div></div>
+        <div class="o-meta">${chip(o.status)}${custBadge(o)}${dueTag(o)}</div></div>
       <div class="end"><div class="o-total">${money(o.total)}</div><div class="s small">${o.status !== 'cancelled' && !o.paid ? '<span style="color:var(--orange)">Unpaid</span>' : o.payment_method ? PAY[o.payment_method] : ''}</div></div>
     </button></div>`;
 }
@@ -440,12 +477,12 @@ function renderOrderList() {
 
 /* order detail */
 function orderBody(o) {
-  const by = o.created_by ? ` · by ${esc(o.created_by.split('@')[0])}` : '';
+  const by = isCustApp(o) ? ' · via Customer app' : o.created_by ? ` · by ${esc(o.created_by.split('@')[0])}` : '';
   const m = relMins(o.pickup_time);
   const step = STATUSES.indexOf(o.status);
   return `<div class="detail-hero"><div class="no num">Order #${o.order_no} · placed ${fmtDT(o.created_at)}${by}</div>
     <h3>${esc(o.customer_name)}</h3><div class="when">${icon('clock', 'xs')} Pickup ${fmtDT(o.pickup_time)}${isActive(o) ? ` · ${relLabel(m)}` : ''}</div>
-    <div class="o-meta" style="justify-content:center;margin-top:8px">${chip(o.status)}${dueTag(o)}${o.locked ? `<span class="chip tag-muted">${icon('lock', 'xs')} Locked</span>` : ''}</div></div>
+    <div class="o-meta" style="justify-content:center;margin-top:8px">${chip(o.status)}${custBadge(o)}${dueTag(o)}${o.locked ? `<span class="chip tag-muted">${icon('lock', 'xs')} Locked</span>` : ''}</div></div>
     ${o.status !== 'cancelled' ? `<div class="progress">${STATUSES.map((s, i) => `<div class="${i <= step ? 'on' : ''}"></div>`).join('')}</div>
     <div class="progress-l">${STATUSES.map(s => `<span>${ST_LABEL[s]}</span>`).join('')}</div>
     <div class="seg mt">${STATUSES.map(s => `<button class="${o.status === s ? 'on' : ''}" data-a="setStatus" data-id="${o.id}" data-s="${s}">${ST_LABEL[s]}</button>`).join('')}</div>` : ''}
@@ -973,7 +1010,8 @@ const A = {
   resend: async () => { const { error } = await sb.auth.resend({ type: 'signup', email: S.authEmail, options: { emailRedirectTo: appURL() } }); showAuth('signin', error ? esc(errMsg(error)) : `Confirmation email sent again to ${esc(S.authEmail)}.`, !error); },
   signOut: async () => { try { await sb.auth.signOut({ scope: 'local' }); } catch (e) { } clearAuthStorage(); stop(); S.session = null; showAuth('signin'); },
   oseg: el => { S.of.seg = el.dataset.k; renderOrders(); },
-  openOrder: el => openOrder(el.dataset.id),
+  openOrder: el => { const b = $('neworder'); if (b && el.closest('#neworder')) b.classList.remove('on'); openOrder(el.dataset.id); },
+  dismissAlert: () => { const b = $('neworder'); if (b) b.classList.remove('on'); },
   advance: (el) => { const o = S.orders.find(x => x.id === el.dataset.id); if (o && NEXT[o.status]) setStatus(o.id, NEXT[o.status], el); },
   cancelOrder: el => setStatus(el.dataset.id, 'cancelled', el),
   setStatus: el => setStatus(el.dataset.id, el.dataset.s, el),
