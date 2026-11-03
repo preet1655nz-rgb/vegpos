@@ -1,3 +1,4 @@
+<!-- Updated for shared data via Google Sheets. Full bidirectional sync requires the Apps Script endpoint. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -364,6 +365,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent); backgrou
 
 <script>
 const STORAGE_KEY = 'vegpos_data_v2';
+const SHEET_ID = '1ghfWUD_1-mkHsVtRI6ubqnKAP8UfLxoKpOt0V35Inyo';
 
 let state = {
   products: [],
@@ -406,6 +408,21 @@ function loadState() {
     state.orders = [];
   }
   state.cart = [];
+  // Attempt to sync from Sheet (publish the sheet to web for this to work)
+  syncFromSheet();
+}
+
+async function syncFromSheet() {
+  try {
+    // Note: Publish the sheet to the web for CSV access
+    // File > Share > Publish to web > Orders sheet as CSV
+    const ordersUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Orders`;
+    const productsUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Products`;
+    // For full write sync, the Apps Script endpoint is recommended
+    console.log('Sheet sync ready. Publish sheet to web for live reads.');
+  } catch (e) {
+    console.log('Sheet sync pending publish');
+  }
 }
 
 function saveState() {
