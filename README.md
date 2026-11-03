@@ -16,3 +16,8 @@ Order-taking, sales and inventory app for VegPOS, styled like an iPhone app. It'
 
 ## Database
 The schema changes are in `supabase/migrations/`. Stock updates and order totals run in database functions (`save_order`, `set_order_status`, `adjust_stock`, `set_stock`) so they stay consistent across devices.
+
+## Data protection
+- **Nothing is deleted:** orders, items and stock history can't be deleted from the app or by any signed-in user. Cancel an order or archive an item instead. Database triggers also block DELETE and TRUNCATE for everyone except database admins running migrations.
+- **Audit log:** every insert, update and delete on orders, items, stock history, staff and settings is recorded in `audit_log`, with the old row, the new row, who made the change and when. The log is append-only: nobody, not even the API service role, can edit or erase it.
+- **Locked orders:** a locked order (🔒) can still move through its status and have its payment marked, but its items, totals, customer, times and number can't change, and it can't be cancelled. Only the owner can unlock it, from the order detail screen. The 7 orders imported from the old app are locked.

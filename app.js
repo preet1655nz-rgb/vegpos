@@ -334,12 +334,12 @@ function orderRow(o) {
   const nx = NEXT[o.status];
   const acts = o.status === 'cancelled' ? '' :
     (nx ? `<button style="background:var(--accent)" data-a="advance" data-id="${o.id}">${icon('check', 'sm')}${ST_LABEL[nx]}</button>` : '') +
-    `<button style="background:var(--red)" data-a="cancelOrder" data-id="${o.id}">${icon('xc', 'sm')}Cancel</button>`;
-  const w = o.status === 'cancelled' ? 0 : nx ? 168 : 84;
+    (o.locked ? '' : `<button style="background:var(--red)" data-a="cancelOrder" data-id="${o.id}">${icon('xc', 'sm')}Cancel</button>`);
+  const w = o.status === 'cancelled' ? 0 : (nx ? 84 : 0) + (o.locked ? 0 : 84);
   return `<div class="row-wrap" data-w="${w}">${w ? `<div class="swipe-actions">${acts}</div>` : ''}
     <button class="row" data-a="openOrder" data-id="${o.id}">
       <div class="o-time"><b>${tm}</b><small>${ap || ''}</small></div>
-      <div class="grow"><div class="t">${esc(o.customer_name)} <span class="muted small num">#${o.order_no}</span></div>
+      <div class="grow"><div class="t">${esc(o.customer_name)} <span class="muted small num">#${o.order_no}</span>${o.locked ? `<span class="lockmark" title="Locked" aria-label="Locked">${icon('lock', 'xs')}</span>` : ''}</div>
         <div class="s">${esc(itemsText(o))}</div>
         <div class="o-meta">${chip(o.status)}${dueTag(o)}</div></div>
       <div class="end"><div class="o-total">${money(o.total)}</div><div class="s small">${o.status !== 'cancelled' && !o.paid ? '<span style="color:var(--orange)">Unpaid</span>' : o.payment_method ? PAY[o.payment_method] : ''}</div></div>
@@ -387,7 +387,7 @@ function orderBody(o) {
   const step = STATUSES.indexOf(o.status);
   return `<div class="detail-hero"><div class="no num">Order #${o.order_no} · placed ${fmtDT(o.created_at)}${by}</div>
     <h3>${esc(o.customer_name)}</h3><div class="when">${icon('clock', 'xs')} Pickup ${fmtDT(o.pickup_time)}${isActive(o) ? ` · ${relLabel(m)}` : ''}</div>
-    <div class="o-meta" style="justify-content:center;margin-top:8px">${chip(o.status)}${dueTag(o)}</div></div>
+    <div class="o-meta" style="justify-content:center;margin-top:8px">${chip(o.status)}${dueTag(o)}${o.locked ? `<span class="chip tag-muted">${icon('lock', 'xs')} Locked</span>` : ''}</div></div>
     ${o.status !== 'cancelled' ? `<div class="progress">${STATUSES.map((s, i) => `<div class="${i <= step ? 'on' : ''}"></div>`).join('')}</div>
     <div class="progress-l">${STATUSES.map(s => `<span>${ST_LABEL[s]}</span>`).join('')}</div>
     <div class="seg mt">${STATUSES.map(s => `<button class="${o.status === s ? 'on' : ''}" data-a="setStatus" data-id="${o.id}" data-s="${s}">${ST_LABEL[s]}</button>`).join('')}</div>` : ''}
@@ -401,12 +401,13 @@ function orderBody(o) {
     </div>
     ${o.customer_phone || o.notes ? `<div class="list mt">${o.customer_phone ? `<a class="row" href="tel:${esc(o.customer_phone)}" style="color:inherit;text-decoration:none">${icon('phone', 'sm')}<div class="grow t">${esc(o.customer_phone)}</div><span class="chev">${icon('chev', 'sm')}</span></a>` : ''}
       ${o.notes ? `<div class="row static"><div class="grow"><div class="s">Notes</div><div style="white-space:pre-wrap">${esc(o.notes)}</div></div></div>` : ''}</div>` : ''}
+    ${o.locked ? `<p class="form-note" style="text-align:center">${icon('lock', 'xs')} This order is locked. Status and payment can still be updated; items, customer, times and cancelling are protected.</p>` : ''}
     <div class="actions-grid">
-      <button class="btn" data-a="editOrder" data-id="${o.id}">${icon('edit')}Edit</button>
+      ${o.locked ? '' : `<button class="btn" data-a="editOrder" data-id="${o.id}">${icon('edit')}Edit</button>`}
       <button class="btn" data-a="receipt" data-id="${o.id}">${icon('share')}Receipt</button>
-      ${o.status === 'cancelled' ? `<button class="btn" data-a="setStatus" data-id="${o.id}" data-s="pending">${icon('undo')}Restore</button>` : `<button class="btn danger" data-a="cancelOrder" data-id="${o.id}">${icon('xc')}Cancel</button>`}
+      ${o.locked ? '' : o.status === 'cancelled' ? `<button class="btn" data-a="setStatus" data-id="${o.id}" data-s="pending">${icon('undo')}Restore</button>` : `<button class="btn danger" data-a="cancelOrder" data-id="${o.id}">${icon('xc')}Cancel</button>`}
+      ${isOwner() ? `<button class="btn" data-a="toggleLock" data-id="${o.id}">${icon('lock')}${o.locked ? 'Unlock' : 'Lock'}</button>` : ''}
     </div>
-    ${o.status === 'cancelled' ? `<button class="btn danger block mt" data-a="deleteOrder" data-id="${o.id}">${icon('trash', 'sm')} Delete order permanently</button>` : ''}
     <p class="small muted mt" style="text-align:center">${o.completed_at ? `Completed ${fmtDT(o.completed_at)}` : o.cancelled_at ? `Cancelled ${fmtDT(o.cancelled_at)} · stock returned` : `Updated ${fmtDT(o.updated_at || o.created_at)}`}</p>`;
 }
 function orderFoot(o) { const nx = NEXT[o.status]; return nx ? `<button class="btn primary lg block" data-a="advance" data-id="${o.id}">${NEXT_LABEL[o.status]}</button>` : ''; }
@@ -540,7 +541,7 @@ async function placeOrder(btn) {
   sb.from('products').select('*').then(({ data }) => { if (data) { S.products = data.sort((a, b) => (a.sort_order - b.sort_order) || (a.product_no - b.product_no)); rerender(); } });
 }
 function editOrder(id) {
-  const o = S.orders.find(x => x.id === id); if (!o) return;
+  const o = S.orders.find(x => x.id === id); if (!o) return; if (o.locked) { toast('This order is locked', true); return; }
   S.cart = { id: o.id, no: o.order_no, items: (o.items || []).map(i => ({ ...i, qty: Number(i.qty) || 1, price: Number(i.price) || 0, pieces: Number(i.pieces) || 1 })),
     customer: o.customer_name || '', phone: o.customer_phone || '', date: dayKey(o.pickup_time), time: hm(o.pickup_time), notes: o.notes || '',
     payment: o.payment_method || 'cash', paid: !!o.paid, discount: Number(o.discount) ? String(o.discount) : '' };
@@ -657,7 +658,7 @@ function editorBody() {
       ${e.id ? '' : `<div class="field"><label>Opening stock</label><input data-e="stock" inputmode="numeric" value="${esc(e.stock)}" placeholder="0"></div>`}</div>
     <div class="form mt"><div class="field"><label>Show on menu</label><span style="flex:1"></span><label class="switch"><input type="checkbox" data-e="active" ${e.active ? 'checked' : ''}><span></span></label></div>
       ${e.id ? `<div class="field"><label>Archived</label><span style="flex:1"></span><label class="switch"><input type="checkbox" data-e="archived" ${e.archived ? 'checked' : ''}><span></span></label></div>` : ''}</div>
-    ${e.id ? `<p class="form-note">Archived items are hidden everywhere but kept for past orders and reports.</p><button class="btn danger block mt2" data-a="deleteItem" data-id="${e.id}">${icon('trash', 'sm')} Delete item</button>` : ''}`;
+    ${e.id ? `<p class="form-note">Items are never deleted. Archive an item to hide it everywhere while keeping it for past orders, stock history and reports.</p>` : ''}`;
 }
 function openEditor(id) {
   const p = id && prodById(id);
@@ -842,8 +843,9 @@ const A = {
   printReceipt: el => { const o = S.orders.find(x => x.id === el.dataset.id); $('print-area').innerHTML = receiptHTML(o); window.print(); },
   shareReceipt: async el => { const o = S.orders.find(x => x.id === el.dataset.id), text = receiptText(o);
     try { if (navigator.share) await navigator.share({ title: `Order #${o.order_no}`, text }); else { await navigator.clipboard.writeText(text); toast('Receipt copied'); } } catch (e) { } },
-  deleteOrder: async el => { const o = S.orders.find(x => x.id === el.dataset.id); if (!o || !confirm(`Delete cancelled order #${o.order_no} permanently?`)) return;
-    await busy(el, () => q(sb.from('orders').delete().eq('id', o.id))); applyRow('orders', o, true); closeSheet(); toast(`Order #${o.order_no} deleted`); rerender(); },
+  toggleLock: async el => { const o = S.orders.find(x => x.id === el.dataset.id); if (!o || !isOwner()) return;
+    if (o.locked && !confirm(`Unlock order #${o.order_no}? It can then be edited or cancelled.`)) return;
+    await busy(el, async () => { const r = await q(sb.from('orders').update({ locked: !o.locked }).eq('id', o.id).select().single()); applyRow('orders', r); toast(r.locked ? `#${r.order_no} locked` : `#${r.order_no} unlocked`); buzz(); rerender(); }); },
   cat: el => { S.cat = el.dataset.k; renderMenu(); },
   addVar: el => addVar(el.dataset.p, +el.dataset.v),
   qty: el => { const i = +el.dataset.i, ln = S.cart.items[i]; if (!ln) return; ln.qty += +el.dataset.d; if (ln.qty <= 0) S.cart.items.splice(i, 1); buzz(); cartChanged(); },
@@ -862,8 +864,6 @@ const A = {
   addVariant: () => { S.ed.variants.push({ label: '', price: '', pieces: '1', cost: '' }); $('sheet-body').innerHTML = editorBody(); },
   rmVariant: el => { S.ed.variants.splice(+el.dataset.i, 1); $('sheet-body').innerHTML = editorBody(); },
   saveItem: el => saveItem(el).catch(() => { }),
-  deleteItem: async el => { const p = prodById(el.dataset.id); if (!p || !confirm(`Delete ${p.name}? Past orders keep their details. Consider archiving instead.`)) return;
-    await busy(el, () => q(sb.from('products').delete().eq('id', p.id))); applyRow('products', p, true); closeSheet(); toast(`${p.name} deleted`); rerender(); },
   range: el => { S.ins.range = el.dataset.k; renderInsights(); }, exportCSV,
   saveSettings: async el => { const name = $('g-name').value.trim(), low = parseInt($('g-low').value, 10);
     if (!name) return toast('Business name is required', true); if (!(low >= 0)) return toast('Low-stock alert must be 0 or more', true);
