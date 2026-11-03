@@ -1,13 +1,34 @@
-/* VegPOS v2 — live-synced orders, inventory & sales. Static, no build step. */
+/* Chopsticks & Chaat staff app (internal name: VegPOS) — live-synced orders, inventory & sales. Static, no build step. */
 'use strict';
 const SB_URL = 'https://sjjesqyqaikivonjuxfs.supabase.co';
 // Public "anon" key — safe in the browser. Row Level Security only lets signed-in, allowlisted staff read/write.
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNqamVzcXlxYWlraXZvbmp1eGZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM2NTE0MTUsImV4cCI6MjEwOTIyNzQxNX0.5lN5mz2px5dqUUfvu2hr1kzDN_vMzafsZ5hN13cU0Ds';
 const TZ = 'Pacific/Auckland';
-const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+/* Brand. To use a real logo, replace brand/logo.svg (and brand/apple-touch-icon.png) — same file names, nothing else to change. */
+const BRAND = { name: 'Chopsticks & Chaat', tagline: 'Desi. Crispy. Zingy.', logo: 'brand/logo.svg' };
+
+/* "Remember me": the Supabase session lives in localStorage (stays signed in across visits/tabs, tokens auto-refresh)
+   or, when unticked, in sessionStorage (this tab only). We never store the password — the browser's password manager
+   (iCloud Keychain etc.) handles that via autocomplete="username"/"current-password". Only the email is remembered. */
+const TAB_ONLY_KEY = 'cc.tabOnly', EMAIL_KEY = 'cc.lastEmail'; // tab-only flag lives in sessionStorage, so other tabs are unaffected
+const ls = (() => { try { return window.localStorage; } catch (e) { return null; } })(), ss = (() => { try { return window.sessionStorage; } catch (e) { return null; } })();
+const remembering = () => !!ls && !(ss && ss.getItem(TAB_ONLY_KEY) === '1'); // default on
+const authStore = {
+  getItem: k => remembering() ? ((ls && ls.getItem(k)) ?? (ss && ss.getItem(k)) ?? null) : ((ss && ss.getItem(k)) ?? null),
+  setItem: (k, v) => { const [a, b] = remembering() ? [ls, ss] : [ss, ls]; a && a.setItem(k, v); b && b.removeItem(k); },
+  removeItem: k => { ls && ls.removeItem(k); ss && ss.removeItem(k); }
+};
+function setRemember(on, email) {
+  if (on) { ss && ss.removeItem(TAB_ONLY_KEY); if (ls && email) ls.setItem(EMAIL_KEY, email); }
+  else { ss && ss.setItem(TAB_ONLY_KEY, '1'); ls && ls.removeItem(EMAIL_KEY); }
+}
+function clearAuthStorage() { for (const st of [ls, ss]) { if (!st) continue; for (let i = st.length - 1; i >= 0; i--) { const k = st.key(i); if (k && /^sb-.*-auth-token/.test(k)) st.removeItem(k); } } }
+const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { storage: authStore, persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
 /* ---------- tiny helpers ---------- */
 const $ = id => document.getElementById(id);
+/* shown business name: the Settings value, unless it is still the old internal default */
+const bizName = () => { const n = (S.settings.business_name || '').trim(); return n && !/^vegpos$/i.test(n) ? n : BRAND.name; };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const IC = {
   orders: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
@@ -78,7 +99,7 @@ const PAY = { cash: 'Cash', card: 'Card', online: 'Online' };
 const REASON = { order: 'Order', order_edit: 'Order edited', order_cancel: 'Order cancelled', order_restore: 'Order restored', restock: 'Restock', waste: 'Waste', correction: 'Correction', set: 'Set', initial: 'Opening stock' };
 const S = {
   session: null, me: null, started: false, recovery: false,
-  products: [], pools: [], orders: [], moves: [], staff: [], settings: { business_name: 'VegPOS', low_stock_default: 10 },
+  products: [], pools: [], orders: [], moves: [], staff: [], settings: { business_name: BRAND.name, low_stock_default: 10 },
   tab: 'orders', live: 'connecting',
   of: { seg: 'active', q: '', date: '' }, inv: { seg: 'all', q: '', mode: 'items' }, ins: { range: 'today', from: '', to: '' },
   cart: null, cat: 'All', sheet: null
@@ -180,26 +201,29 @@ const appURL = () => location.origin + location.pathname;
 function showAuth(mode, msg, ok) {
   $('boot').hidden = true; $('shell').hidden = true; $('auth').hidden = false; closeSheet();
   const m = msg ? `<div class="msg ${ok ? 'ok' : 'err'}">${msg}</div>` : '';
-  const head = (t, s) => `<div class="logo">${icon('leaf')}</div><h1>${t}</h1><p class="lead">${s}</p>${m}`;
-  const email = `<div class="field"><label for="a-email">Email</label><input id="a-email" type="email" autocomplete="username" inputmode="email" placeholder="you@example.com" value="${esc(S.authEmail || '')}"></div>`;
+  const head = (t, s) => `<div class="brand-hero"><img class="brand-logo" src="${BRAND.logo}" alt="" width="88" height="88"><div class="brand-name">${esc(bizName())}</div><div class="brand-tag">${esc(BRAND.tagline)}</div></div>${t ? `<h1>${t}</h1>` : ''}<p class="lead">${s}</p>${m}`;
+  if (S.remember === undefined) S.remember = true; // ticked by default on every fresh sign-in screen
+  if (!S.authEmail && ls) S.authEmail = ls.getItem(EMAIL_KEY) || ''; // only saved when the last sign-in was remembered
+  const email = `<div class="field"><label for="a-email">Email</label><input id="a-email" name="username" type="email" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="email" placeholder="you@example.com" value="${esc(S.authEmail || '')}" required></div>`;
   let h = '';
-  if (mode === 'signin') h = head(esc(S.settings.business_name || 'VegPOS'), 'Sign in to manage orders, stock and sales.') +
-    `<form id="a-form" data-mode="signin"><div class="form">${email}<div class="field"><label for="a-pass">Password</label><input id="a-pass" type="password" autocomplete="current-password" placeholder="Required"></div></div>
+  if (mode === 'signin') h = head('', 'Staff sign in — orders, stock and sales.') +
+    `<form id="a-form" data-mode="signin" method="post" action="#" autocomplete="on"><div class="form">${email}<div class="field"><label for="a-pass">Password</label><input id="a-pass" name="password" type="password" autocomplete="current-password" placeholder="Required" required></div></div>
+     <label class="remember"><input type="checkbox" id="a-remember" name="remember" ${S.remember ? 'checked' : ''}><span class="box" aria-hidden="true"></span><span><b>Remember me</b><small>Stay signed in on this device</small></span></label>
      <button class="btn primary lg block" type="submit">Sign in</button></form>
      <div class="links"><button class="btn plain" data-a="authMode" data-m="signup">First time here? Create your password</button><button class="btn plain" data-a="authMode" data-m="forgot">Forgot password?</button>
      ${S.unconfirmed ? '<button class="btn plain" data-a="resend">Resend confirmation email</button>' : ''}</div>`;
-  else if (mode === 'signup') h = head('Create your password', 'Staff only. Use the email the owner added to VegPOS.') +
+  else if (mode === 'signup') h = head('Create your password', 'Staff only. Use the email the owner added to the staff list.') +
     `<form id="a-form" data-mode="signup"><div class="form">${email}<div class="field"><label for="a-pass">Password</label><input id="a-pass" type="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
      <div class="field"><label for="a-pass2">Confirm</label><input id="a-pass2" type="password" autocomplete="new-password" placeholder="Repeat password"></div></div>
      <button class="btn primary lg block" type="submit">Create account</button></form><div class="links"><button class="btn plain" data-a="authMode" data-m="signin">I already have a password</button></div>`;
   else if (mode === 'forgot') h = head('Reset password', "We'll email you a link to set a new password.") +
     `<form id="a-form" data-mode="forgot"><div class="form">${email}</div><button class="btn primary lg block" type="submit">Send reset link</button></form>
      <div class="links"><button class="btn plain" data-a="authMode" data-m="signin">Back to sign in</button></div>`;
-  else if (mode === 'recovery') h = head('Set a new password', 'Choose a new password for your VegPOS account.') +
+  else if (mode === 'recovery') h = head('Set a new password', 'Choose a new password for your staff account.') +
     `<form id="a-form" data-mode="recovery"><div class="form"><div class="field"><label for="a-pass">New</label><input id="a-pass" type="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
      <div class="field"><label for="a-pass2">Confirm</label><input id="a-pass2" type="password" autocomplete="new-password" placeholder="Repeat password"></div></div>
      <button class="btn primary lg block" type="submit">Save password</button></form>`;
-  else if (mode === 'notstaff') h = head('No access yet', `${esc(S.session?.user?.email || '')} isn't on the VegPOS staff list. Ask the owner to add you in Settings → Staff.`) +
+  else if (mode === 'notstaff') h = head('No access yet', `${esc(S.session?.user?.email || '')} isn't on the staff list. Ask the owner to add you in Settings → Staff.`) +
     `<button class="btn lg block" data-a="signOut">Sign out</button>`;
   $('auth-box').innerHTML = h; S.authMode = mode;
 }
@@ -212,6 +236,7 @@ async function authSubmit(form) {
   btn.disabled = true; btn.textContent = 'Please wait…';
   try {
     if (mode === 'signin') {
+      S.remember = !!$('a-remember')?.checked; setRemember(S.remember, email); // decides where the session is stored
       const { error } = await sb.auth.signInWithPassword({ email, password: p1 });
       if (error) { S.unconfirmed = /not confirmed/i.test(error.message); return showAuth('signin', esc(errMsg(error))); }
     } else if (mode === 'signup') {
@@ -303,7 +328,7 @@ function renderTabbar() {
   const overdue = S.orders.filter(o => isActive(o) && relMins(o.pickup_time) < 0).length;
   const low = lowCount();
   const badge = { orders: overdue, inventory: low };
-  $('tabbar').innerHTML = `<div class="side-brand">${esc(S.settings.business_name)}<small>${esc(S.me?.name || S.me?.email || '')}</small></div>` +
+  $('tabbar').innerHTML = `<div class="side-brand"><img src="${BRAND.logo}" alt="" width="40" height="40"><div class="sb-t">${esc(bizName())}<em>${esc(BRAND.tagline)}</em></div><small>${esc(S.me?.name || S.me?.email || '')}</small></div>` +
     TABS.map(([k, l, ic]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-a="go" data-t="${k}" aria-label="${l}">${icon(ic)}<span>${l}</span>${badge[k] ? `<span class="badge">${badge[k]}</span>` : ''}</button>`).join('');
 }
 function go(t) {
@@ -314,7 +339,7 @@ function renderTab(t) { ({ orders: renderOrders, new: renderMenu, inventory: ren
 let rq = 0;
 function rerender() { if (rq) return; rq = requestAnimationFrame(() => { rq = 0; if (!S.started || !S.me) return; renderTab(S.tab); renderTabbar(); refreshSheet(); updateCartbar(); }); }
 function header(title, sub, right = '') {
-  return `<div class="topbar"><div class="left">${liveHTML()}</div><div>${right}</div></div><h1 class="largetitle">${title}</h1>${sub ? `<p class="subtitle">${sub}</p>` : ''}`;
+  return `<div class="tb-brand"><img src="${BRAND.logo}" alt="" width="30" height="30"><span class="n">${esc(bizName())}</span><span class="tg">${esc(BRAND.tagline)}</span></div><div class="topbar"><div class="left">${liveHTML()}</div><div>${right}</div></div><h1 class="largetitle">${title}</h1>${sub ? `<p class="subtitle">${sub}</p>` : ''}`;
 }
 function buildViews() {
   $('v-orders').innerHTML = `<div id="o-head"></div>
@@ -457,7 +482,7 @@ async function setStatus(id, s, btn) {
   rerender();
 }
 function receiptHTML(o) {
-  return `<div class="receipt"><h3>${esc(S.settings.business_name)}</h3><div class="c">Order #${o.order_no} · ${fmtDT(o.created_at)}</div><hr>
+  return `<div class="receipt"><h3>${esc(bizName())}</h3><div class="c">Order #${o.order_no} · ${fmtDT(o.created_at)}</div><hr>
     <div class="r"><span>Customer</span><span>${esc(o.customer_name)}</span></div>${o.customer_phone ? `<div class="r"><span>Phone</span><span>${esc(o.customer_phone)}</span></div>` : ''}
     <div class="r"><span>Pickup</span><span>${fmtDT(o.pickup_time)}</span></div><hr>
     ${(o.items || []).map(i => `<div class="r"><span>${i.qty}× ${esc(i.name)} ${esc(i.variant || '')}</span><span>${money(i.price * i.qty)}</span></div>`).join('')}<hr>
@@ -467,7 +492,7 @@ function receiptHTML(o) {
     ${o.notes ? `<hr><div>${esc(o.notes)}</div>` : ''}<hr><div class="c">Thank you!</div></div>`;
 }
 function receiptText(o) {
-  return [`${S.settings.business_name} — Order #${o.order_no}`, `Customer: ${o.customer_name}`, `Pickup: ${fmtDT(o.pickup_time)}`, '',
+  return [`${bizName()} — Order #${o.order_no}`, `Customer: ${o.customer_name}`, `Pickup: ${fmtDT(o.pickup_time)}`, '',
     ...(o.items || []).map(i => `${i.qty}× ${i.name} ${i.variant || ''} — ${money(i.price * i.qty)}`), '',
     ...(Number(o.discount) ? [`Discount: −${money(o.discount)}`] : []), `Total: ${money(o.total)}`, `${o.paid ? 'Paid' : 'To pay'}${o.payment_method ? ' (' + PAY[o.payment_method] + ')' : ''}`].join('\n');
 }
@@ -912,7 +937,7 @@ function exportCSV() {
     Number(o.subtotal || o.total).toFixed(2), Number(o.discount || 0).toFixed(2), Number(o.total).toFixed(2), o.payment_method ? PAY[o.payment_method] : '', o.paid ? 'Yes' : 'No', o.notes,
     `${dayKey(o.created_at)} ${hm(o.created_at)}`, o.created_by].map(csvCell).join(','));
   const blob = new Blob(['\ufeff' + [head.join(','), ...body].join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const el = document.createElement('a'); el.href = URL.createObjectURL(blob); el.download = `vegpos-orders_${a}_to_${b}.csv`; document.body.appendChild(el); el.click();
+  const el = document.createElement('a'); el.href = URL.createObjectURL(blob); el.download = `chopsticks-chaat-orders_${a}_to_${b}.csv`; document.body.appendChild(el); el.click();
   setTimeout(() => { URL.revokeObjectURL(el.href); el.remove(); }, 500); toast(`Exported ${rows.length} orders`);
 }
 
@@ -922,7 +947,7 @@ function renderSettings() {
   const me = S.session?.user?.email || '';
   g.innerHTML = header('Settings', '') + `
     <div class="form-h">Business</div><div class="form">
-      <div class="field"><label>Name</label><input id="g-name" value="${esc(S.settings.business_name)}" maxlength="60"></div>
+      <div class="field"><label>Name</label><input id="g-name" value="${esc(bizName())}" maxlength="60"></div>
       <div class="field"><label>Low-stock alert</label><input id="g-low" inputmode="numeric" value="${esc(S.settings.low_stock_default)}"><span class="unit">pcs</span></div></div>
     <p class="form-note">Default alert level for items without their own. Times are shown in NZ time (Pacific/Auckland).</p>
     <div style="padding:10px 0 0"><button class="btn block" data-a="saveSettings">Save business settings</button></div>
@@ -937,7 +962,7 @@ function renderSettings() {
       <div class="row static">${icon('mail', 'sm')}<div class="grow"><div class="t">${esc(me)}</div><div class="s">${isOwner() ? 'Owner' : 'Staff'} · ${liveHTML()}</div></div></div>
       <button class="row" data-a="changePw">${icon('lock', 'sm')}<span class="grow t">Change password</span><span class="chev">${icon('chev', 'sm')}</span></button>
       <button class="row" data-a="signOut" style="color:var(--red)">${icon('logout', 'sm')}<span class="grow t">Sign out</span></button></div>
-    <p class="small muted mt2" style="text-align:center">VegPOS · live sync across all your devices</p>`;
+    <p class="small muted mt2" style="text-align:center">${esc(BRAND.name)} · ${esc(BRAND.tagline)} · live sync across all your devices</p>`;
 }
 
 /* ---------- events ---------- */
@@ -946,7 +971,7 @@ const A = {
   clearDate: () => { S.of.date = ''; renderOrders(); },
   closeSheet, authMode: el => showAuth(el.dataset.m),
   resend: async () => { const { error } = await sb.auth.resend({ type: 'signup', email: S.authEmail, options: { emailRedirectTo: appURL() } }); showAuth('signin', error ? esc(errMsg(error)) : `Confirmation email sent again to ${esc(S.authEmail)}.`, !error); },
-  signOut: async () => { await sb.auth.signOut(); stop(); showAuth('signin'); },
+  signOut: async () => { try { await sb.auth.signOut({ scope: 'local' }); } catch (e) { } clearAuthStorage(); stop(); S.session = null; showAuth('signin'); },
   oseg: el => { S.of.seg = el.dataset.k; renderOrders(); },
   openOrder: el => openOrder(el.dataset.id),
   advance: (el) => { const o = S.orders.find(x => x.id === el.dataset.id); if (o && NEXT[o.status]) setStatus(o.id, NEXT[o.status], el); },

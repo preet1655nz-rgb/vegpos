@@ -45,3 +45,14 @@ and products linked to it never contribute their legacy `products.stock`. This c
 cost prices exist), Low / Out of stock counts, the header, the Low-stock filter and tab badge, and Restocked/Waste · 7d
 (which skip own-stock movements of now-linked products). Linked rows show "Uses <stock>: N pcs" and a "Shared" pill.
 No SQL change was needed: there are no views, and the stock functions route linked products to the shared row only.
+
+### v5 — Chopsticks & Chaat rebrand + Remember me
+- Staff app branded **Chopsticks & Chaat** ("Desi. Crispy. Zingy."): deep maroon + gold on warm cream, serif display type.
+  Brand assets live in `/brand` — replace `brand/logo.svg`, `brand/apple-touch-icon.png` (180×180) and `brand/icon-512.png`
+  with the real logo (same file names) and it changes everywhere (login, header, sidebar, favicon, home-screen icon).
+  Name/tagline are in the `BRAND` constant at the top of `app.js`. Internal names (repo, URL, realtime channel) stay "vegpos".
+  The shown business name is Settings → Business name, unless it is still the old default "VegPOS", which shows as the brand.
+- **Remember me** (ticked by default): session kept in localStorage with token auto-refresh, last email prefilled.
+  Unticked: session in sessionStorage (this tab only), email not saved. The password is never stored by the app —
+  `autocomplete="username"` / `"current-password"` lets iCloud Keychain / browser password managers save and autofill it.
+  Sign out clears the session from both storages (scope: this device).
