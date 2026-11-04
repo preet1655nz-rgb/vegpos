@@ -1,0 +1,4 @@
+# Merge into supabase/config.toml when deploying with the CLI (or pass --no-verify-jwt).
+# The function authenticates callers with the x-notify-secret header instead of a user JWT.
+[functions.notify-new-order]
+verify_jwt = false

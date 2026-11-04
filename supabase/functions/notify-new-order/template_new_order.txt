@@ -1,0 +1,24 @@
+Template name: new_order
+Category: Utility
+Language: English (en)
+
+Body (6 variables):
+New pickup order {{1}} at rasoi · DELI + KITCHEN.
+
+Customer: {{2}}
+Phone: {{3}}
+Pickup: {{4}} (NZ time)
+Items: {{5}}
+Total: {{6}}, cash on pickup.
+
+Please open the rasoi staff app to accept the order.
+
+Sample values for Meta review:
+{{1}} #29
+{{2}} Gary
+{{3}} 021 168 1559
+{{4}} Wed 4 Nov, 6:15 pm
+{{5}} 1x Veg Momos Steamed (8pcs), 1x Veg Puff Patties (3pcs)
+{{6}} $20.00
+
+Footer (optional, no variables): Staff alert · rasoi DELI + KITCHEN

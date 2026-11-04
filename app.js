@@ -357,11 +357,10 @@ function waText(o) {
   return lines.join('\n');
 }
 const staffWA = () => waNumber(S.settings.staff_whatsapp);
-function waURL(o, to) { const n = to === 'staff' ? staffWA() : waNumber(o.customer_phone); return `https://wa.me/${n || ''}?text=${encodeURIComponent(waText(o))}`; }
+// staff-side only: the order goes to the staff/owner WhatsApp number from Settings (never to the customer)
+function waURL(o) { const n = staffWA(); return `https://wa.me/${n || ''}?text=${encodeURIComponent(waText(o))}`; }
 function waButtons(o, cls = 'btn') {
-  const c = waNumber(o.customer_phone), st = staffWA();
-  return `<a class="${cls} wa" href="${esc(waURL(o, 'customer'))}" target="_blank" rel="noopener" data-wa="customer" data-id="${o.id}">${icon('wa', 'sm')}<span>WhatsApp customer${c ? '' : ' <small>(pick chat)</small>'}</span></a>
-    <a class="${cls} wa" href="${esc(waURL(o, 'staff'))}" target="_blank" rel="noopener" data-wa="staff" data-id="${o.id}">${icon('wa', 'sm')}<span>WhatsApp staff${st ? '' : ' <small>(pick chat)</small>'}</span></a>`;
+  return `<a class="${cls} wa" href="${esc(waURL(o))}" target="_blank" rel="noopener" data-wa="staff" data-id="${o.id}">${icon('wa', 'sm')}<span>Send to WhatsApp${staffWA() ? '' : ' <small>(pick chat)</small>'}</span></a>`;
 }
 
 /* alerts: sound/vibration need one tap on this device (browser rule); system notifications need permission */
@@ -605,8 +604,8 @@ function orderBody(o) {
     ${loyaltyBlock(o)}
     ${o.customer_phone || o.notes ? `<div class="list mt">${o.customer_phone ? `<a class="row" href="tel:${esc(o.customer_phone)}" style="color:inherit;text-decoration:none">${icon('phone', 'sm')}<div class="grow t">${esc(o.customer_phone)}</div><span class="chev">${icon('chev', 'sm')}</span></a>` : ''}
       ${o.notes ? `<div class="row static"><div class="grow"><div class="s">Notes</div><div style="white-space:pre-wrap">${esc(o.notes)}</div></div></div>` : ''}</div>` : ''}
-    <div class="form-h">Send on WhatsApp</div><div class="wa-row">${waButtons(o)}</div>
-    <p class="form-note">Opens WhatsApp with the order message ready. Nothing is sent until you press Send in WhatsApp.${staffWA() ? '' : ' Add the staff/owner number in Settings → Alerts &amp; WhatsApp.'}</p>
+    <div class="form-h">Send to WhatsApp</div><div class="wa-row">${waButtons(o)}</div>
+    <p class="form-note">Opens WhatsApp to the staff/owner number with the order details ready. Nothing is sent until you press Send in WhatsApp.${staffWA() ? '' : ' Add the staff/owner number in Settings → Alerts &amp; WhatsApp.'}</p>
     ${o.locked ? `<p class="form-note" style="text-align:center">${icon('lock', 'xs')} This order is locked. Status and payment can still be updated; items, customer, times and cancelling are protected.</p>` : ''}
     <div class="actions-grid">
       ${o.locked ? '' : `<button class="btn" data-a="editOrder" data-id="${o.id}">${icon('edit')}Edit</button>`}
@@ -1292,7 +1291,7 @@ function renderSettings() {
     <div style="padding:10px 0 0"><button class="btn block" data-a="saveSettings">Save business settings</button></div>
     <div class="form-h">Alerts &amp; WhatsApp</div><div class="form">
       <div class="field"><label>Staff WhatsApp</label><input id="g-wa" type="tel" inputmode="tel" value="${esc(S.settings.staff_whatsapp || '')}" placeholder="e.g. 021 123 4567" maxlength="24"></div></div>
-    <p class="form-note">The owner/staff number for “WhatsApp staff” on orders. NZ numbers can start with 0 (we add +64). Leave blank to pick a chat each time.</p>
+    <p class="form-note">The owner/staff number that “Send to WhatsApp” on orders goes to. NZ numbers can start with 0 (we add +64). Leave blank to pick a chat each time.</p>
     <div style="padding:10px 0 0;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn" style="flex:1" data-a="saveWA">Save WhatsApp number</button>${alertsBtnHTML()}</div>
     <p class="form-note">Tap <b>Enable alerts</b> once on each device so new orders can play a sound, vibrate and show a notification. The new-order card stays on screen until someone opens, accepts or taps “Got it”.</p>
     ${shopSettingsHTML()}
