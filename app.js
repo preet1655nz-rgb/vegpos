@@ -54,6 +54,8 @@ const IC = {
   card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>', cash: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>', arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   star: '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9 6.8 19.6l1-5.8-4.3-4.1 5.9-.9z"/>', tag: '<path d="M3.5 12.5V4h8.5l8.5 8.5-8.5 8.5z"/><circle cx="8" cy="8.5" r="1.4"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  wa: '<path d="M4 20l1.3-3.9A8 8 0 1 1 8 19z"/><path d="M9 8.5c0 3.5 3 6.5 6.5 6.5l1-1.6-2-1-1 .9a5 5 0 0 1-2.8-2.8l.9-1-1-2z"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>', lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
 };
 const icon = (n, c = '') => `<svg class="i ${c}" viewBox="0 0 24 24" aria-hidden="true">${IC[n] || ''}</svg>`;
@@ -305,8 +307,8 @@ function applyRow(table, row, del) {
 }
 function onChange(p) {
   const del = p.eventType === 'DELETE';
-  if (p.table === 'orders' && p.eventType === 'INSERT' && p.new) newOrderAlert(p.new);
   applyRow(p.table, del ? p.old : p.new, del);
+  if (p.table === 'orders' && p.eventType === 'INSERT' && p.new) newOrderAlert(p.new);
   // one transaction can update a shared pool row several times (e.g. Steamed + Fried in one order); re-read the pools so the level is always the committed one
   if (['stock_movements', 'stock_items', 'orders'].includes(p.table)) refreshPools();
   if (p.table === 'staff' && del && S.session && p.old.email === S.session.user.email.toLowerCase()) { S.me = null; return showAuth('notstaff'); }
@@ -316,7 +318,7 @@ function onChange(p) {
 const isCustApp = o => o && o.created_by === 'customer-app';
 const custBadge = o => isCustApp(o) ? `<span class="chip src-app">${icon('orders', 'xs')}Customer app</span>` : '';
 const alerted = new Set();
-let audioCtx = null, alertT;
+let audioCtx = null;
 function unlockAudio() {
   try { if (!audioCtx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) audioCtx = new AC(); } if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) { }
 }
@@ -332,22 +334,100 @@ function chime() {
     });
   } catch (e) { }
 }
+/* WhatsApp: build a clean order message and open wa.me with it ready. Never sends by itself; staff press Send in WhatsApp. */
+function waNumber(p) { // NZ default: 021 123 4567 -> 64211234567; +61 4.. kept as-is; 0064.. -> 64..
+  const raw = String(p || '').trim(); let d = raw.replace(/[^0-9]/g, '');
+  if (d.length < 7) return null;
+  if (d.startsWith('00')) return d.slice(2);
+  if (raw.startsWith('+')) return d;
+  if (d.startsWith('64') && d.length >= 10) return d;
+  if (d.startsWith('0')) return '64' + d.replace(/^0+/, '');
+  return '64' + d;
+}
+const pickupLong = d => { const k = dayKey(d), t = today(); const rel = k === t ? 'Today, ' : k === dayKey(Date.now() + 864e5) ? 'Tomorrow, ' : ''; return `${rel}${new Date(d).toLocaleDateString('en-NZ', { timeZone: TZ, weekday: 'short' })} ${new Date(d).toLocaleDateString('en-NZ', { timeZone: TZ, day: 'numeric', month: 'short' })} at ${fmtTime(d)}`; };
+function waText(o) {
+  const items = o.items || [], lines = [
+    `*${BRAND.name} · ${BRAND.tagline}*`, `Order #${o.order_no}`, '',
+    `Customer: ${o.customer_name || ''}`, ...(o.customer_phone ? [`Phone: ${o.customer_phone}`] : []),
+    `Pickup: ${pickupLong(o.pickup_time)} (NZ time)`, '',
+    ...items.map(i => `• ${i.qty} × ${i.name}${i.variant ? ` (${i.variant})` : ''} = ${money(Number(i.price) * Number(i.qty))}`), ''];
+  if (Number(o.discount)) lines.push(`Subtotal: ${money(o.subtotal || o.total)}`, `Discount${o.promo_code ? ` (${o.promo_code})` : ''}: −${money(o.discount)}`);
+  lines.push(`*Total: ${money(o.total)}*`, o.paid ? `Paid (${PAY[o.payment_method] || 'cash'})` : 'Cash on pickup');
+  if (o.notes) lines.push('', `Notes: ${o.notes}`);
+  return lines.join('\n');
+}
+const staffWA = () => waNumber(S.settings.staff_whatsapp);
+function waURL(o, to) { const n = to === 'staff' ? staffWA() : waNumber(o.customer_phone); return `https://wa.me/${n || ''}?text=${encodeURIComponent(waText(o))}`; }
+function waButtons(o, cls = 'btn') {
+  const c = waNumber(o.customer_phone), st = staffWA();
+  return `<a class="${cls} wa" href="${esc(waURL(o, 'customer'))}" target="_blank" rel="noopener" data-wa="customer" data-id="${o.id}">${icon('wa', 'sm')}<span>WhatsApp customer${c ? '' : ' <small>(pick chat)</small>'}</span></a>
+    <a class="${cls} wa" href="${esc(waURL(o, 'staff'))}" target="_blank" rel="noopener" data-wa="staff" data-id="${o.id}">${icon('wa', 'sm')}<span>WhatsApp staff${st ? '' : ' <small>(pick chat)</small>'}</span></a>`;
+}
+
+/* alerts: sound/vibration need one tap on this device (browser rule); system notifications need permission */
+const notifOK = () => 'Notification' in window;
+const alertsState = () => ({ sound: !!(audioCtx && audioCtx.state === 'running'), notif: notifOK() ? Notification.permission : 'unsupported' });
+function alertsBtnHTML() {
+  const a = alertsState(), on = a.sound && (a.notif === 'granted' || a.notif === 'unsupported');
+  return on ? `<span class="alerts-on" title="New-order alerts are on">${icon('bell', 'xs')}Alerts on</span>`
+    : `<button class="btn sm alerts-btn" data-a="enableAlerts">${icon('bell', 'xs')}Enable alerts</button>`;
+}
+async function enableAlerts() {
+  unlockAudio();
+  if (notifOK() && Notification.permission === 'default') { try { await Notification.requestPermission(); } catch (e) { } }
+  setTimeout(() => { chime(); try { navigator.vibrate && navigator.vibrate(120); } catch (e) { } }, 60);
+  const a = alertsState();
+  toast(a.notif === 'granted' ? 'Alerts on: sound, vibration and notifications' : a.notif === 'denied' ? 'Sound alerts on. Notifications are blocked in this browser’s settings' : a.notif === 'unsupported' ? 'Sound alerts on (this browser has no system notifications)' : 'Sound alerts on');
+  rerender();
+}
+function sysNotify(o) {
+  try {
+    if (!notifOK() || Notification.permission !== 'granted') return;
+    const n = new Notification(`New order #${o.order_no}${isCustApp(o) ? ' · Customer app' : ''}`, {
+      body: `${o.customer_name || ''} · pickup ${fmtDT(o.pickup_time)} · ${money(o.total)}\n${itemsText(o)}`,
+      tag: 'order-' + o.id, requireInteraction: true, icon: BRAND.logo, badge: 'brand/rasoi/favicon-32.png' });
+    n.onclick = () => { try { window.focus(); } catch (e) { } ackAlert(o.id); openOrder(o.id); n.close(); };
+    (S.notifs = S.notifs || {})[o.id] = n;
+  } catch (e) { }
+}
+/* queue of unacknowledged new orders; the card stays until Open / Accept / Got it */
+const pendingAlerts = [], alertRows = {};
+let ringT = null;
 function newOrderAlert(o) {
   if (!S.started || !o.id || alerted.has(o.id)) return; alerted.add(o.id);
   // only live, fresh inserts: never on initial load / resync, and not for orders this device just entered itself
   if (o.created_at && Date.now() - new Date(o.created_at).getTime() > 10 * 60000) return;
   const mine = S.session && o.created_by && o.created_by.toLowerCase() === (S.session.user.email || '').toLowerCase();
   if (mine) return;
-  let b = $('neworder');
-  if (!b) { b = document.createElement('div'); b.id = 'neworder'; b.className = 'neworder'; b.setAttribute('role', 'alert'); b.setAttribute('aria-live', 'assertive'); document.body.appendChild(b); }
-  b.innerHTML = `<button class="no-main" data-a="openOrder" data-id="${o.id}"><span class="no-ic">${icon('orders', 'sm')}</span><span class="grow"><b>New order #${o.order_no}${isCustApp(o) ? ' · Customer app' : ''}</b>
-    <small>${esc(o.customer_name || '')} · pickup ${fmtDT(o.pickup_time)} · ${money(o.total)}</small></span><span class="no-view">View</span></button>
-    ${o.status === 'pending' ? `<button class="no-accept" data-a="acceptAlert" data-id="${o.id}">${icon('check', 'sm')}Accept</button>` : ''}
-    <button class="no-x" data-a="dismissAlert" aria-label="Dismiss">${icon('xc', 'sm')}</button>`;
-  b.classList.toggle('app', isCustApp(o)); requestAnimationFrame(() => b.classList.add('on'));
-  clearTimeout(alertT); alertT = setTimeout(() => b.classList.remove('on'), 15000);
-  chime(); try { navigator.vibrate && navigator.vibrate([180, 90, 180]); } catch (e) { }
+  alertRows[o.id] = o; pendingAlerts.push(o.id); renderAlert();
+  ring(); sysNotify(o);
+  clearInterval(ringT); let n = 0; ringT = setInterval(() => { if (!pendingAlerts.length || ++n > 10) return clearInterval(ringT); ring(); }, 30000); // re-ring every 30 s (max 5 min) until acknowledged
   if (document.hidden) { const t0 = document.title; document.title = `● New order #${o.order_no}`; const back = () => { if (!document.hidden) { document.title = t0; document.removeEventListener('visibilitychange', back); } }; document.addEventListener('visibilitychange', back); }
+}
+function ring() { chime(); try { navigator.vibrate && navigator.vibrate([220, 100, 220, 100, 220]); } catch (e) { } }
+function ackAlert(id) {
+  const i = pendingAlerts.indexOf(id); if (i >= 0) pendingAlerts.splice(i, 1);
+  try { S.notifs && S.notifs[id] && S.notifs[id].close(); } catch (e) { }
+  if (!pendingAlerts.length) clearInterval(ringT);
+  renderAlert();
+}
+function renderAlert() {
+  let b = $('neworder');
+  if (!b) { b = document.createElement('div'); b.id = 'neworder'; b.className = 'neworder'; b.setAttribute('role', 'alertdialog'); b.setAttribute('aria-live', 'assertive'); b.setAttribute('aria-label', 'New order'); document.body.appendChild(b); }
+  const id = pendingAlerts[0], o = id && (S.orders.find(x => x.id === id) || alertRows[id]);
+  if (!o) { b.classList.remove('on'); if (id) { pendingAlerts.shift(); return renderAlert(); } return; }
+  const more = pendingAlerts.length - 1;
+  b.innerHTML = `<div class="no-top"><span class="no-ic">${icon('bell', 'sm')}</span><div class="grow"><div class="no-k">New order${isCustApp(o) ? ' · Customer app' : ''}${more > 0 ? ` · +${more} more` : ''}</div><div class="no-n">#${o.order_no} · ${esc(o.customer_name || '')}</div></div>
+      <div class="no-tot num">${money(o.total)}</div></div>
+    <div class="no-when">${icon('clock', 'xs')} Pickup <b>${esc(fmtDT(o.pickup_time))}</b>${o.customer_phone ? ` · ${esc(o.customer_phone)}` : ''} · ${o.paid ? 'Paid' : 'Cash on pickup'}</div>
+    <ul class="no-items">${(o.items || []).map(i => `<li><span>${i.qty} × ${esc(i.name)}${i.variant ? ` <small>${esc(i.variant)}</small>` : ''}</span><span class="num">${money(Number(i.price) * Number(i.qty))}</span></li>`).join('')}</ul>
+    ${o.notes ? `<div class="no-notes">${esc(o.notes)}</div>` : ''}
+    <div class="no-acts">
+      ${o.status === 'pending' ? `<button class="no-btn solid" data-a="acceptAlert" data-id="${o.id}">${icon('check', 'sm')}Accept</button>` : ''}
+      <button class="no-btn" data-a="openOrder" data-id="${o.id}">Open order</button>
+      ${waButtons(o, 'no-btn')}
+      <button class="no-btn ghost" data-a="dismissAlert" data-id="${o.id}">Got it</button></div>`;
+  b.classList.toggle('app', isCustApp(o)); requestAnimationFrame(() => b.classList.add('on'));
 }
 let poolT;
 function refreshPools() { clearTimeout(poolT); poolT = setTimeout(async () => { if (!S.started) return; const { data } = await sb.from('stock_items').select('*').order('sort_order').order('name'); if (data) { S.pools = data; rerender(); } }, 350); }
@@ -420,7 +500,7 @@ function buildViews() {
 const revenueOf = list => list.filter(o => o.status !== 'cancelled').reduce((a, o) => a + Number(o.total || 0), 0);
 function renderOrders() {
   const t = today(), long = keyDate(t).toLocaleDateString('en-NZ', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
-  $('o-head').innerHTML = header('Orders', long, `<button class="btn primary sm" data-a="go" data-t="new">${icon('plus', 'xs')} New order</button>`);
+  $('o-head').innerHTML = header('Orders', long, `${alertsBtnHTML()} <button class="btn primary sm" data-a="go" data-t="new">${icon('plus', 'xs')} New order</button>`);
   const tod = S.orders.filter(o => dayKey(o.pickup_time) === t);
   const active = S.orders.filter(isActive);
   const next = active.slice().sort((a, b) => new Date(a.pickup_time) - new Date(b.pickup_time))[0];
@@ -525,6 +605,8 @@ function orderBody(o) {
     ${loyaltyBlock(o)}
     ${o.customer_phone || o.notes ? `<div class="list mt">${o.customer_phone ? `<a class="row" href="tel:${esc(o.customer_phone)}" style="color:inherit;text-decoration:none">${icon('phone', 'sm')}<div class="grow t">${esc(o.customer_phone)}</div><span class="chev">${icon('chev', 'sm')}</span></a>` : ''}
       ${o.notes ? `<div class="row static"><div class="grow"><div class="s">Notes</div><div style="white-space:pre-wrap">${esc(o.notes)}</div></div></div>` : ''}</div>` : ''}
+    <div class="form-h">Send on WhatsApp</div><div class="wa-row">${waButtons(o)}</div>
+    <p class="form-note">Opens WhatsApp with the order message ready. Nothing is sent until you press Send in WhatsApp.${staffWA() ? '' : ' Add the staff/owner number in Settings → Alerts &amp; WhatsApp.'}</p>
     ${o.locked ? `<p class="form-note" style="text-align:center">${icon('lock', 'xs')} This order is locked. Status and payment can still be updated; items, customer, times and cancelling are protected.</p>` : ''}
     <div class="actions-grid">
       ${o.locked ? '' : `<button class="btn" data-a="editOrder" data-id="${o.id}">${icon('edit')}Edit</button>`}
@@ -1208,6 +1290,11 @@ function renderSettings() {
       <div class="field"><label>Low-stock alert</label><input id="g-low" inputmode="numeric" value="${esc(S.settings.low_stock_default)}"><span class="unit">pcs</span></div></div>
     <p class="form-note">Default alert level for items without their own. Times are shown in NZ time (Pacific/Auckland).</p>
     <div style="padding:10px 0 0"><button class="btn block" data-a="saveSettings">Save business settings</button></div>
+    <div class="form-h">Alerts &amp; WhatsApp</div><div class="form">
+      <div class="field"><label>Staff WhatsApp</label><input id="g-wa" type="tel" inputmode="tel" value="${esc(S.settings.staff_whatsapp || '')}" placeholder="e.g. 021 123 4567" maxlength="24"></div></div>
+    <p class="form-note">The owner/staff number for “WhatsApp staff” on orders. NZ numbers can start with 0 (we add +64). Leave blank to pick a chat each time.</p>
+    <div style="padding:10px 0 0;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn" style="flex:1" data-a="saveWA">Save WhatsApp number</button>${alertsBtnHTML()}</div>
+    <p class="form-note">Tap <b>Enable alerts</b> once on each device so new orders can play a sound, vibrate and show a notification. The new-order card stays on screen until someone opens, accepts or taps “Got it”.</p>
     ${shopSettingsHTML()}
     <div class="form-h">Promotions &amp; loyalty</div><div class="list">
       <button class="row" data-a="openPromos">${icon('tag', 'sm')}<span class="grow"><span class="t">Promotions</span><span class="s" style="display:block">${S.promos.filter(p => !p.archived && p.active).length} active · ${S.promos.filter(p => !p.archived).length} total</span></span><span class="chev">${icon('chev', 'sm')}</span></button>
@@ -1255,9 +1342,14 @@ const A = {
   resend: async () => { const { error } = await sb.auth.resend({ type: 'signup', email: S.authEmail, options: { emailRedirectTo: appURL() } }); showAuth('signin', error ? esc(errMsg(error)) : `Confirmation email sent again to ${esc(S.authEmail)}.`, !error); },
   signOut: async () => { try { await sb.auth.signOut({ scope: 'local' }); } catch (e) { } clearAuthStorage(); stop(); S.session = null; showAuth('signin'); },
   oseg: el => { S.of.seg = el.dataset.k; renderOrders(); },
-  openOrder: el => { const b = $('neworder'); if (b && el.closest('#neworder')) b.classList.remove('on'); openOrder(el.dataset.id); },
-  dismissAlert: () => { const b = $('neworder'); if (b) b.classList.remove('on'); },
-  acceptAlert: el => { const b = $('neworder'); if (b) b.classList.remove('on'); return accept(el.dataset.id, el); },
+  openOrder: el => { if (el.closest('#neworder')) ackAlert(el.dataset.id); openOrder(el.dataset.id); },
+  dismissAlert: el => ackAlert(el.dataset.id || pendingAlerts[0]),
+  acceptAlert: el => { const id = el.dataset.id; ackAlert(id); return accept(id, el); },
+  enableAlerts: () => enableAlerts(),
+  saveWA: async el => { const v = $('g-wa').value.trim();
+    if (v && !waNumber(v)) return toast('Enter a WhatsApp number with at least 7 digits', true);
+    const r = await busy(el, () => q(sb.from('settings').update({ staff_whatsapp: v || null, updated_at: new Date().toISOString() }).eq('id', 1).select().single()));
+    S.settings = r; toast(v ? `Staff WhatsApp saved (+${waNumber(v)})` : 'Staff WhatsApp cleared'); renderSettings(); },
   accept: el => accept(el.dataset.id, el),
   paidCash: el => paidCash(el.dataset.id, el),
   cashSheet: el => openCash(el.dataset.id),
@@ -1336,6 +1428,7 @@ const A = {
     await busy(el, async () => { const { error } = await sb.auth.updateUser({ password: a }); if (error) throw error; }); closeSheet(); toast('Password updated'); }
 };
 document.addEventListener('click', e => {
+  const wa = e.target.closest('a[data-wa]'); if (wa && wa.closest('#neworder')) ackAlert(wa.dataset.id);
   const el = e.target.closest('[data-a]'); if (!el || el.tagName === 'INPUT' || el.disabled) return;
   const w = el.closest('.row-wrap');
   if (w && el.classList.contains('row') && (w.dataset.swiped || w.classList.contains('open'))) { w.classList.remove('open'); el.style.transform = ''; return; }

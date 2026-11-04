@@ -640,3 +640,37 @@ body{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helv
 .panel h3,.sheet-head h2{font-family:"Caveat","Bradley Hand",cursive;font-weight:700;font-size:28px;letter-spacing:0;color:#0A5C56}
 @media (prefers-color-scheme:dark){.largetitle,.section-h b,.panel h3,.sheet-head h2{color:var(--accent-ink)}}
 .cashgrid .btn[disabled]{opacity:.38}
+
+/* ===================== v8: persistent new-order card + WhatsApp ===================== */
+.neworder{display:block;padding:16px 16px 14px;border-radius:22px;width:min(600px,calc(100% - 20px));max-height:calc(100dvh - 24px);overflow:auto;
+  transform:translate(-50%,-130%);outline:3px solid rgba(255,255,255,.0)}
+.neworder.on{transform:translate(-50%,0);animation:noGlow 1.6s ease-in-out 4}
+@keyframes noGlow{0%,100%{box-shadow:0 18px 40px -12px rgba(6,78,59,.6),0 0 0 0 rgba(10,92,86,.0)}50%{box-shadow:0 18px 40px -12px rgba(6,78,59,.6),0 0 0 10px rgba(10,92,86,.25)}}
+.neworder .no-top{display:flex;align-items:center;gap:12px}
+.neworder .no-ic{width:46px;height:46px;border-radius:14px;animation:noPulse 1.2s ease-in-out infinite}
+.neworder .no-ic svg{width:24px;height:24px}
+.neworder .no-k{font-size:12.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.85}
+.neworder .no-n{font-size:21px;font-weight:800;line-height:1.2;margin-top:1px}
+.neworder .no-tot{font-size:22px;font-weight:800;white-space:nowrap}
+.neworder .no-when{margin-top:10px;font-size:15px;opacity:.95;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.neworder .no-when svg{width:14px;height:14px}
+.neworder .no-items{list-style:none;margin:12px 0 0;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.12);display:grid;gap:6px}
+.neworder .no-items li{display:flex;justify-content:space-between;gap:12px;font-size:16px;font-weight:600}
+.neworder .no-items small{display:inline;font-size:13px;font-weight:500;opacity:.8;margin:0}
+.neworder .no-notes{margin-top:8px;padding:8px 12px;border-radius:12px;background:rgba(255,255,255,.08);font-size:14px;white-space:pre-wrap}
+.neworder .no-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.neworder .no-btn{flex:1 1 auto;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:46px;padding:0 14px;border:0;border-radius:13px;
+  background:rgba(255,255,255,.16);color:#fff;font:inherit;font-weight:700;font-size:14.5px;cursor:pointer;text-decoration:none}
+.neworder .no-btn svg{width:17px;height:17px}
+.neworder .no-btn small{display:inline;font-size:12px;font-weight:500;opacity:.8;margin:0}
+.neworder .no-btn.solid{background:#fff;color:#064E3B}
+.neworder .no-btn.wa{background:#1FA855}
+.neworder .no-btn.ghost{background:none;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.45)}
+.neworder .no-btn:focus-visible{outline:2px solid #fff;outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.neworder.on,.neworder .no-ic{animation:none}}
+.wa-row{display:flex;flex-wrap:wrap;gap:10px}
+.wa-row .btn.wa{flex:1 1 200px;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;background:#1FA855;color:#fff;min-height:48px;font-weight:700}
+.wa-row .btn.wa small{font-weight:500;opacity:.85}
+.alerts-btn{background:#fff;color:#0A5C56;box-shadow:inset 0 0 0 1.5px #0A5C56}
+.alerts-on{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--accent-ink);padding:0 6px}
+.alerts-on svg,.alerts-btn svg{width:14px;height:14px}
