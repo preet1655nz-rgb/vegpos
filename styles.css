@@ -674,3 +674,33 @@ body{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helv
 .alerts-btn{background:#fff;color:#0A5C56;box-shadow:inset 0 0 0 1.5px #0A5C56}
 .alerts-on{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--accent-ink);padding:0 6px}
 .alerts-on svg,.alerts-btn svg{width:14px;height:14px}
+
+/* ---------- v9: two stages (New → Accepted → Completed) + green tick ---------- */
+.st-new{background:rgba(255,149,0,.16);color:#B45F00}
+.st-accepted{background:rgba(10,92,86,.12);color:#0A5C56}
+.st-cancelled{background:var(--fill);color:var(--text2)}
+@media (prefers-color-scheme:dark){.st-new{color:var(--orange)}.st-accepted{color:#5EC4B8}}
+.seg button.seg-new{color:#B45F00;font-weight:700}
+.seg button .seg-n{display:inline-block;min-width:18px;padding:0 6px;border-radius:9px;background:#FF9500;color:#fff;font-size:12px;line-height:18px}
+.seg button.seg-muted{opacity:.6;font-weight:500}
+.seg button.seg-muted.on{opacity:1}
+.btn.donebtn{background:#16A34A;border-color:#16A34A;color:#fff;font-weight:700}
+.btn.donebtn:active{background:#12813B}
+.btn.donebtn svg{stroke:#fff}
+.btn.subtle-danger{background:transparent;border-color:transparent;color:var(--text2);font-weight:500;font-size:14px}
+.btn.subtle-danger svg{opacity:.6}
+.btn.subtle-danger:hover{color:var(--red)}
+.donetick{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;pointer-events:none;
+  background:rgba(22,163,74,0);transition:background .25s ease;visibility:hidden}
+.donetick.on{visibility:visible;background:rgba(22,163,74,.18);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
+.donetick .dt-card{display:flex;flex-direction:column;align-items:center;gap:14px;transform:scale(.4);opacity:0}
+.donetick.on .dt-card{animation:dtPop .5s cubic-bezier(.2,1.4,.4,1) forwards, dtOut .3s ease 1.1s forwards}
+.donetick svg{width:min(52vw,220px);height:min(52vw,220px);filter:drop-shadow(0 12px 30px rgba(22,163,74,.45))}
+.donetick .dt-c{fill:#16A34A;stroke:#16A34A;stroke-width:4}
+.donetick .dt-k{fill:none;stroke:#fff;stroke-width:11;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:90;stroke-dashoffset:90}
+.donetick.on .dt-k{animation:dtDraw .38s ease-out .22s forwards}
+.donetick .dt-l{font-size:22px;font-weight:800;color:#0F5132;background:#fff;padding:8px 18px;border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.12)}
+@keyframes dtPop{to{transform:scale(1);opacity:1}}
+@keyframes dtDraw{to{stroke-dashoffset:0}}
+@keyframes dtOut{to{transform:scale(1.08);opacity:0}}
+@media (prefers-reduced-motion:reduce){.donetick.on .dt-card{animation:none;transform:none;opacity:1}.donetick.on .dt-k{animation:none;stroke-dashoffset:0}}

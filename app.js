@@ -94,17 +94,20 @@ function relMins(d) { return Math.round((new Date(d).getTime() - Date.now()) / 6
 function relLabel(m) { const a = Math.abs(m); const s = a < 60 ? `${a} min` : a < 1440 ? `${Math.floor(a / 60)}h ${a % 60 ? (a % 60) + 'm' : ''}`.trim() : `${Math.round(a / 1440)}d`; return m >= 0 ? `in ${s}` : `${s} late`; }
 
 /* ---------- state ---------- */
-const STATUSES = ['pending', 'preparing', 'ready', 'completed'];
-const ST_LABEL = { pending: 'Pending', preparing: 'Preparing', ready: 'Ready', completed: 'Completed', cancelled: 'Cancelled' };
-const NEXT = { pending: 'preparing', preparing: 'ready', ready: 'completed' };
-const NEXT_LABEL = { pending: 'Accept order', preparing: 'Mark ready', ready: 'Complete order' };
+/* Two working stages: New (customer orders waiting) → Accepted → Completed. Legacy 'preparing'/'ready' rows show as Accepted. */
+const STAGES = ['new', 'accepted', 'completed'];
+const stage = o => !o ? '' : o.status === 'pending' ? 'new' : ['accepted', 'preparing', 'ready'].includes(o.status) ? 'accepted' : o.status;
+const ST_LABEL = { new: 'New', pending: 'New', accepted: 'Accepted', preparing: 'Accepted', ready: 'Accepted', completed: 'Completed', cancelled: 'Cancelled' };
+const NEXT = { pending: 'accepted', accepted: 'completed', preparing: 'completed', ready: 'completed' };
+const NEXT_LABEL = { pending: 'Accept order', accepted: 'Complete', preparing: 'Complete', ready: 'Complete' };
+const completeLabel = o => o.paid ? 'Complete order' : `Complete · paid cash ${money(o.total)}`;
 const PAY = { cash: 'Cash', card: 'Card', online: 'Online' };
 const REASON = { order: 'Order', order_edit: 'Order edited', order_cancel: 'Order cancelled', order_restore: 'Order restored', restock: 'Restock', waste: 'Waste', correction: 'Correction', set: 'Set', initial: 'Opening stock' };
 const S = {
   session: null, me: null, started: false, recovery: false,
   products: [], pools: [], orders: [], moves: [], staff: [], customers: [], promos: [], settings: { business_name: BRAND.name, low_stock_default: 10 },
   tab: 'orders', live: 'connecting',
-  of: { seg: 'active', q: '', date: '' }, inv: { seg: 'all', q: '', mode: 'items' }, ins: { range: 'today', from: '', to: '' },
+  of: { seg: '', q: '', date: '' }, inv: { seg: 'all', q: '', mode: 'items' }, ins: { range: 'today', from: '', to: '' },
   cart: null, cat: 'All', sheet: null
 };
 function newCart() {
@@ -161,7 +164,7 @@ function invTotals() {
 const lowCount = () => invTotals().low.length;
 /* list filter "low": linked products are represented by their shared-stock row, so they are not repeated */
 const lowRow = p => !p.archived && !poolOf(p) && isLow(p);
-const isActive = o => ['pending', 'preparing', 'ready'].includes(o.status);
+const isActive = o => ['pending', 'accepted', 'preparing', 'ready'].includes(o.status);
 const itemsCount = o => (o.items || []).reduce((a, i) => a + (Number(i.qty) || 0), 0);
 const itemsText = o => (o.items || []).map(i => `${i.qty}× ${i.name}${i.variant ? ' ' + i.variant : ''}`).join(', ');
 function dueTag(o) {
@@ -171,7 +174,7 @@ function dueTag(o) {
   if (m <= 30) return `<span class="chip tag-soon">Due ${relLabel(m)}</span>`;
   return '';
 }
-const chip = s => `<span class="chip st-${s}">${ST_LABEL[s] || s}</span>`;
+const chip = s => { const k = stage({ status: s }); return `<span class="chip st-${k}">${ST_LABEL[k] || s}</span>`; };
 
 /* ---------- feedback ---------- */
 let toastT;
@@ -511,24 +514,26 @@ function renderOrders() {
     ['Unpaid', money(S.orders.filter(o => !o.paid && o.status !== 'cancelled').reduce((a, o) => a + Number(o.total), 0)), 'Awaiting payment']
   ].map(([k, v, d]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div><div class="d">${d}</div></div>`).join('');
   $('o-date').value = S.of.date || ''; $('o-date-l').textContent = S.of.date ? fmtDay(S.of.date) : 'Any day'; $('o-date-x').hidden = !S.of.date;
-  const cnt = s => S.orders.filter(o => (s === 'active' ? isActive(o) : s === 'all' ? true : o.status === s) && (!S.of.date || dayKey(o.pickup_time) === S.of.date)).length;
-  $('o-seg').innerHTML = [['active', 'Active'], ['completed', 'Completed'], ['cancelled', 'Cancelled'], ['all', 'All']]
-    .map(([k, l]) => `<button class="${S.of.seg === k ? 'on' : ''}" data-a="oseg" data-k="${k}">${l} <span class="muted num">${cnt(k)}</span></button>`).join('');
+  const cnt = s => S.orders.filter(o => stage(o) === s && (!S.of.date || dayKey(o.pickup_time) === S.of.date)).length;
+  const nNew = cnt('new');
+  if (!S.of.seg || (S.of.seg === 'new' && !nNew)) S.of.seg = nNew ? 'new' : 'accepted';
+  $('o-seg').innerHTML = [...(nNew || S.of.seg === 'new' ? [['new', 'New']] : []), ['accepted', 'Accepted'], ['completed', 'Completed'], ['cancelled', 'Cancelled']]
+    .map(([k, l]) => `<button class="${S.of.seg === k ? 'on' : ''}${k === 'new' ? ' seg-new' : ''}${k === 'cancelled' ? ' seg-muted' : ''}" data-a="oseg" data-k="${k}">${l} <span class="${k === 'new' ? 'seg-n' : 'muted'} num">${cnt(k)}</span></button>`).join('');
   renderOrderList();
 }
 function filteredOrders() {
   const qq = S.of.q.trim().toLowerCase();
-  let list = S.orders.filter(o => S.of.seg === 'active' ? isActive(o) : S.of.seg === 'all' ? true : o.status === S.of.seg);
+  let list = S.orders.filter(o => stage(o) === S.of.seg);
   if (S.of.date) list = list.filter(o => dayKey(o.pickup_time) === S.of.date);
   if (qq) list = list.filter(o => (`#${o.order_no} ${o.customer_name} ${o.customer_phone || ''} ${o.notes || ''} ${itemsText(o)}`).toLowerCase().includes(qq.replace(/^#/, '#')));
-  const asc = S.of.seg === 'active';
+  const asc = S.of.seg === 'new' || S.of.seg === 'accepted';
   return list.sort((a, b) => asc ? new Date(a.pickup_time) - new Date(b.pickup_time) : new Date(b.pickup_time) - new Date(a.pickup_time));
 }
 function orderRow(o) {
   const [tm, ap] = fmtTime(o.pickup_time).split(' ');
   const nx = NEXT[o.status];
   const acts = o.status === 'cancelled' ? '' :
-    (nx ? `<button style="background:var(--accent)" data-a="advance" data-id="${o.id}">${icon('check', 'sm')}${o.status === 'pending' ? 'Accept' : ST_LABEL[nx]}</button>` : '') +
+    (nx ? `<button style="background:${o.status === 'pending' ? 'var(--accent)' : '#16A34A'}" data-a="advance" data-id="${o.id}">${icon('check', 'sm')}${o.status === 'pending' ? 'Accept' : 'Complete'}</button>` : '') +
     (o.locked ? '' : `<button style="background:var(--red)" data-a="cancelOrder" data-id="${o.id}">${icon('xc', 'sm')}Cancel</button>`);
   const w = o.status === 'cancelled' ? 0 : (nx ? 84 : 0) + (o.locked ? 0 : 84);
   return `<div class="row-wrap" data-w="${w}">${w ? `<div class="swipe-actions">${acts}</div>` : ''}
@@ -541,14 +546,15 @@ function orderRow(o) {
     </button></div>${quickActs(o)}`;
 }
 function quickActs(o) {
-  if (o.status === 'cancelled' || (o.paid && o.status !== 'pending')) return '';
-  return `<div class="qacts">${o.status === 'pending' ? `<button class="btn primary sm" data-a="accept" data-id="${o.id}">${icon('check', 'xs')}Accept</button>` : ''}
-    ${o.paid ? '' : `<button class="btn sm cashbtn" data-a="paidCash" data-id="${o.id}">${icon('cash', 'xs')}Paid cash · ${money(o.total)}</button><button class="btn sm plainish" data-a="cashSheet" data-id="${o.id}" aria-label="Cash received for order ${o.order_no}">Cash received…</button>`}</div>`;
+  const st = stage(o);
+  if (st === 'new') return `<div class="qacts"><button class="btn primary sm" data-a="accept" data-id="${o.id}">${icon('check', 'xs')}Accept</button></div>`;
+  if (st !== 'accepted') return '';
+  return `<div class="qacts"><button class="btn sm donebtn" data-a="complete" data-id="${o.id}">${icon('check', 'xs')}${completeLabel(o)}</button>${o.paid ? '' : `<button class="btn sm plainish" data-a="cashSheet" data-id="${o.id}" data-complete="1" aria-label="Cash received or tip for order ${o.order_no}">Cash / tip…</button>`}</div>`;
 }
 function renderOrderList() {
   const list = filteredOrders();
   if (!list.length) {
-    $('o-list').innerHTML = `<div class="empty">${icon('orders')}<b>${S.of.q || S.of.date ? 'No matching orders' : S.of.seg === 'active' ? 'No active orders' : 'No orders yet'}</b>${S.of.seg === 'active' && !S.of.q ? 'New orders appear here instantly on every device.' : 'Try a different filter.'}</div>`;
+    $('o-list').innerHTML = `<div class="empty">${icon('orders')}<b>${S.of.q || S.of.date ? 'No matching orders' : ({ new: 'No new orders', accepted: 'No accepted orders', completed: 'No completed orders', cancelled: 'No cancelled orders' })[S.of.seg] || 'No orders yet'}</b>${(S.of.seg === 'new' || S.of.seg === 'accepted') && !S.of.q ? 'New orders appear here instantly on every device.' : 'Try a different filter.'}</div>`;
     return;
   }
   const groups = new Map();
@@ -584,13 +590,12 @@ function renderOrderList() {
 function orderBody(o) {
   const by = isCustApp(o) ? ' · via Customer app' : o.created_by ? ` · by ${esc(o.created_by.split('@')[0])}` : '';
   const m = relMins(o.pickup_time);
-  const step = STATUSES.indexOf(o.status);
+  const step = STAGES.indexOf(stage(o));
   return `<div class="detail-hero"><div class="no num">Order #${o.order_no} · placed ${fmtDT(o.created_at)}${by}</div>
     <h3>${esc(o.customer_name)}</h3><div class="when">${icon('clock', 'xs')} Pickup ${fmtDT(o.pickup_time)}${isActive(o) ? ` · ${relLabel(m)}` : ''}</div>
     <div class="o-meta" style="justify-content:center;margin-top:8px">${chip(o.status)}${custBadge(o)}${dueTag(o)}${o.locked ? `<span class="chip tag-muted">${icon('lock', 'xs')} Locked</span>` : ''}</div></div>
-    ${o.status !== 'cancelled' ? `<div class="progress">${STATUSES.map((s, i) => `<div class="${i <= step ? 'on' : ''}"></div>`).join('')}</div>
-    <div class="progress-l">${STATUSES.map(s => `<span>${ST_LABEL[s]}</span>`).join('')}</div>
-    <div class="seg mt">${STATUSES.map(s => `<button class="${o.status === s ? 'on' : ''}" data-a="setStatus" data-id="${o.id}" data-s="${s}">${ST_LABEL[s]}</button>`).join('')}</div>` : ''}
+    ${o.status !== 'cancelled' ? `<div class="progress">${STAGES.map((s, i) => `<div class="${i <= step ? 'on' : ''}"></div>`).join('')}</div>
+    <div class="progress-l">${STAGES.map(s => `<span>${ST_LABEL[s]}</span>`).join('')}</div>` : ''}
     <div class="form-h">Items</div><div class="list">${(o.items || []).map(i => `<div class="line"><div class="grow"><div class="t">${esc(i.name)}</div><div class="s">${esc(i.variant || '')} · ${money(i.price)} each</div></div><div class="muted num">×${i.qty}</div><div class="p">${money(i.price * i.qty)}</div></div>`).join('')}</div>
     <div class="list totals mt">
       <div class="row static"><div class="grow t">Subtotal</div><div class="end num">${money(o.subtotal || o.total)}</div></div>
@@ -600,7 +605,7 @@ function orderBody(o) {
         <label class="switch"><input type="checkbox" ${o.paid ? 'checked' : ''} data-a="togglePaid" data-id="${o.id}" aria-label="Paid"><span></span></label></div>
       ${o.paid && o.cash_received != null ? `<div class="row static"><div class="grow"><div class="t">Cash received ${money(o.cash_received)}</div><div class="s">Change given ${money(o.change_given)}${Number(o.tip) ? ` · <b>Tip ${money(o.tip)}</b>` : ''}</div></div></div>` : ''}
     </div>
-    ${o.status !== 'cancelled' && !o.paid ? `<div class="paybar mt"><button class="btn primary lg" data-a="paidCash" data-id="${o.id}">${icon('cash', 'sm')}Paid cash · ${money(o.total)}</button><button class="btn lg" data-a="cashSheet" data-id="${o.id}">Cash received…</button></div>` : ''}
+    ${stage(o) === 'accepted' && !o.paid ? `<p class="form-note" style="text-align:center">Complete records <b>paid cash ${money(o.total)}</b>. Got a different amount or a tip? <a href="#" data-a="cashSheet" data-id="${o.id}" data-complete="1">Cash received / tip…</a></p>` : ''}
     ${loyaltyBlock(o)}
     ${o.customer_phone || o.notes ? `<div class="list mt">${o.customer_phone ? `<a class="row" href="tel:${esc(o.customer_phone)}" style="color:inherit;text-decoration:none">${icon('phone', 'sm')}<div class="grow t">${esc(o.customer_phone)}</div><span class="chev">${icon('chev', 'sm')}</span></a>` : ''}
       ${o.notes ? `<div class="row static"><div class="grow"><div class="s">Notes</div><div style="white-space:pre-wrap">${esc(o.notes)}</div></div></div>` : ''}</div>` : ''}
@@ -610,12 +615,14 @@ function orderBody(o) {
     <div class="actions-grid">
       ${o.locked ? '' : `<button class="btn" data-a="editOrder" data-id="${o.id}">${icon('edit')}Edit</button>`}
       <button class="btn" data-a="receipt" data-id="${o.id}">${icon('share')}Receipt</button>
-      ${o.locked ? '' : o.status === 'cancelled' ? `<button class="btn" data-a="setStatus" data-id="${o.id}" data-s="pending">${icon('undo')}Restore</button>` : `<button class="btn danger" data-a="cancelOrder" data-id="${o.id}">${icon('xc')}Cancel</button>`}
+      ${o.locked ? '' : o.status === 'cancelled' ? `<button class="btn" data-a="setStatus" data-id="${o.id}" data-s="accepted">${icon('undo')}Restore</button>` : `<button class="btn subtle-danger" data-a="cancelOrder" data-id="${o.id}">${icon('xc')}Cancel order</button>`}
       ${isOwner() ? `<button class="btn" data-a="toggleLock" data-id="${o.id}">${icon('lock')}${o.locked ? 'Unlock' : 'Lock'}</button>` : ''}
     </div>
     <p class="small muted mt" style="text-align:center">${o.completed_at ? `Completed ${fmtDT(o.completed_at)}` : o.cancelled_at ? `Cancelled ${fmtDT(o.cancelled_at)} · stock returned` : `Updated ${fmtDT(o.updated_at || o.created_at)}`}</p>`;
 }
-function orderFoot(o) { const nx = NEXT[o.status]; return nx ? `<button class="btn primary lg block" data-a="advance" data-id="${o.id}">${o.status === 'pending' ? icon('check', 'sm') : ''}${NEXT_LABEL[o.status]}</button>` : ''; }
+function orderFoot(o) { const st = stage(o);
+  return st === 'new' ? `<button class="btn primary lg block" data-a="accept" data-id="${o.id}">${icon('check', 'sm')}Accept order</button>`
+    : st === 'accepted' ? `<button class="btn lg block donebtn" data-a="complete" data-id="${o.id}">${icon('check', 'sm')}${completeLabel(o)}</button>` : ''; }
 function discRows(o) {
   const man = r2(Number(o.discount || 0) - Number(o.promo_discount || 0) - Number(o.points_discount || 0));
   return (man > 0 ? `<div class="row static"><div class="grow t">Discount</div><div class="end num">−${money(man)}</div></div>` : '') +
@@ -802,7 +809,7 @@ async function placeOrder(btn, cash) {
   toast(cash ? `#${r.order_no} paid cash · ${money(r.total)}${extra}` : c.id ? `Order #${r.order_no} updated` : `Order #${r.order_no} saved · ${money(r.total)} to pay`);
   if (S.sheet) closeSheet();
   S.cart = newCart(); if (S.sheet) closeSheet();
-  S.of.seg = 'active'; go('orders');
+  S.of.seg = 'accepted'; go('orders');
   sb.from('products').select('*').then(({ data }) => { if (data) { S.products = data.sort((a, b) => (a.sort_order - b.sort_order) || (a.product_no - b.product_no)); rerender(); } });
   sb.from('stock_items').select('*').order('sort_order').order('name').then(({ data }) => { if (data) { S.pools = data; rerender(); } });
 }
@@ -817,7 +824,24 @@ function editOrder(id) {
 }
 
 /* ---------- Cash payment ---------- */
-async function accept(id, btn) { const o = S.orders.find(x => x.id === id); if (!o || o.status !== 'pending') return; await setStatus(id, 'preparing', btn); }
+async function accept(id, btn) { const o = S.orders.find(x => x.id === id); if (!o || o.status !== 'pending') return; await setStatus(id, 'accepted', btn); }
+/* Complete = paid in cash (unless already paid) + completed, in one server call; then the green tick. */
+async function complete(id, btn, received, tip) {
+  const o = S.orders.find(x => x.id === id); if (!o || stage(o) !== 'accepted') return;
+  const r = await busy(btn, () => rpc('complete_order', { p_order_id: id, p_cash_received: received ?? null, p_keep_tip: !!tip }));
+  applyRow('orders', r); greenTick(`#${r.order_no} completed`);
+  toast(`#${r.order_no} completed · paid ${PAY[r.payment_method] || 'cash'} ${money(r.total)}${Number(r.tip) ? ` · tip ${money(r.tip)}` : Number(r.change_given) ? ` · change ${money(r.change_given)}` : ''}`);
+  if (S.sheet && S.sheet.key === id) closeSheet();
+  rerender(); return r;
+}
+function greenTick(label) {
+  let t = $('donetick');
+  if (!t) { t = document.createElement('div'); t.id = 'donetick'; t.className = 'donetick'; t.setAttribute('role', 'status'); t.setAttribute('aria-live', 'polite'); document.body.appendChild(t); }
+  t.innerHTML = `<div class="dt-card"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="dt-c" cx="60" cy="60" r="52"/><path class="dt-k" d="M36 62l16 16 33-36"/></svg><div class="dt-l">${esc(label || 'Completed')}</div></div>`;
+  t.classList.remove('on'); void t.offsetWidth; t.classList.add('on');
+  try { navigator.vibrate && navigator.vibrate([30, 40, 60]); } catch (e) { }
+  clearTimeout(greenTick.t); greenTick.t = setTimeout(() => t.classList.remove('on'), 1400);
+}
 async function paidCash(id, btn, received, tip) {
   const o = S.orders.find(x => x.id === id); if (!o) return;
   const r = await busy(btn, () => rpc('mark_order_paid_cash', { p_order_id: id, p_cash_received: received ?? null, p_keep_tip: !!tip }));
@@ -843,10 +867,10 @@ function cashChangeHTML() {
   if (!ok) return `<div class="k">Cash received ${money(rec)} is less than ${money(t)}</div>`;
   return c.tip && extra > 0 ? `<div class="k">Tip kept</div><div class="v num">${money(extra)}</div><div class="k">No change to give</div>` : `<div class="k">Change due</div><div class="v num">${money(extra)}</div><div class="k">Received ${money(rec)}</div>`;
 }
-function cashFoot() { const t = cashTotal(), rec = cashRecv(); return `<button class="btn primary lg block" data-a="cashConfirm" ${rec >= t - 0.001 ? '' : 'disabled'}>${icon('cash', 'sm')}Confirm paid cash · ${money(t)}</button>`; }
-function openCash(id) {
+function cashFoot() { const t = cashTotal(), rec = cashRecv(), done = S.cash && S.cash.complete; return `<button class="btn ${done ? 'donebtn' : 'primary'} lg block" data-a="cashConfirm" ${rec >= t - 0.001 ? '' : 'disabled'}>${icon(done ? 'check' : 'cash', 'sm')}${done ? 'Complete' : 'Confirm'} · paid cash ${money(t)}</button>`; }
+function openCash(id, complete) {
   if (id === 'cart' && !S.cart.items.length) return toast('Add at least one item', true);
-  S.cash = { id, received: null, custom: '', tip: false };
+  S.cash = { id, received: null, custom: '', tip: false, complete: !!complete };
   openSheet({ title: 'Cash received', key: 'cash', body: cashBody(), foot: cashFoot(), left: id === 'cart' ? `<button class="btn plain" data-a="backToCart">${icon('back', 'sm')}Order</button>` : `<button class="btn plain" data-a="openOrder" data-id="${id}">${icon('back', 'sm')}Order</button>`,
     refresh() { $('sheet-body').innerHTML = cashBody(); $('sheet-foot').innerHTML = cashFoot(); } });
 }
@@ -856,7 +880,9 @@ function cashUpdate() { const ch = $('cash-change'); if (!ch) return; const t = 
 async function cashConfirm(btn) {
   const c = S.cash, rec = cashRecv(), t = cashTotal(); if (!(rec >= t - 0.001)) return toast('Cash received is less than the total', true);
   if (c.id === 'cart') { await placeOrder(btn, { received: rec, tip: c.tip }); S.cash = null; return; }
-  const id = c.id; await paidCash(id, btn, rec, c.tip); S.cash = null; openOrder(id);
+  const id = c.id;
+  if (c.complete) { await complete(id, btn, rec, c.tip); S.cash = null; closeSheet(); return; }
+  await paidCash(id, btn, rec, c.tip); S.cash = null; openOrder(id);
 }
 
 /* ---------- Promotions (staff) ---------- */
@@ -1351,7 +1377,8 @@ const A = {
     S.settings = r; toast(v ? `Staff WhatsApp saved (+${waNumber(v)})` : 'Staff WhatsApp cleared'); renderSettings(); },
   accept: el => accept(el.dataset.id, el),
   paidCash: el => paidCash(el.dataset.id, el),
-  cashSheet: el => openCash(el.dataset.id),
+  cashSheet: el => openCash(el.dataset.id, el.dataset.complete === '1'),
+  complete: el => complete(el.dataset.id, el),
   cashPick: el => { S.cash.custom = ''; S.cash.received = el.dataset.n === 'exact' ? null : Number(el.dataset.n); const st = $('sheet-body').scrollTop; $('sheet-body').innerHTML = cashBody(); $('sheet-body').scrollTop = st; $('sheet-foot').innerHTML = cashFoot(); buzz(); },
   cashConfirm: el => cashConfirm(el),
   backToCart: () => openCheckout(),
@@ -1380,7 +1407,7 @@ const A = {
     const r = await busy(el, () => rpc('save_shop_settings', { p: { open_time: $('g-open').value, close_time: $('g-close').value, min_notice_minutes: n, max_days_ahead: dd, open_days: days,
       contact_phone: $('g-cphone').value.trim(), contact_email: $('g-cemail').value.trim(), bulk_note: $('g-bulk').value.trim(), loyalty_enabled: $('g-loy').checked, loyalty_earn_per_dollar: earn, loyalty_redeem_points: rp, loyalty_redeem_value: rv } }));
     S.settings = r; toast('Ordering & loyalty settings saved'); renderSettings(); },
-  advance: (el) => { const o = S.orders.find(x => x.id === el.dataset.id); if (o && NEXT[o.status]) setStatus(o.id, NEXT[o.status], el); },
+  advance: (el) => { const o = S.orders.find(x => x.id === el.dataset.id); if (!o) return; if (stage(o) === 'new') return accept(o.id, el); if (stage(o) === 'accepted') return complete(o.id, el); },
   cancelOrder: el => setStatus(el.dataset.id, 'cancelled', el),
   setStatus: el => setStatus(el.dataset.id, el.dataset.s, el),
   editOrder: el => editOrder(el.dataset.id), receipt: el => openReceipt(el.dataset.id),
