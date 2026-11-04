@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>rasoi · Order pickup</title>
+<meta name="description" content="rasoi deli + kitchen. Order momos and snacks online for pickup. Pickup only, cash only, pay at pickup. Please order 1–2 hours ahead.">
+<meta name="theme-color" content="#0A5C56">
+<meta name="color-scheme" content="light">
+<meta name="format-detection" content="telephone=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="rasoi">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="rasoi · deli + kitchen">
+<meta property="og:title" content="rasoi · Order pickup">
+<meta property="og:description" content="rasoi deli + kitchen. Order online for pickup. Cash only, pay at pickup.">
+<meta property="og:url" content="https://chopsticks-chaat.vercel.app/">
+<meta property="og:image" content="https://chopsticks-chaat.vercel.app/brand/rasoi/rasoi-logo.jpg">
+<meta property="og:image:width" content="784">
+<meta property="og:image:height" content="1168">
+<meta property="og:image:alt" content="rasoi deli + kitchen logo">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="rasoi · Order pickup">
+<meta name="twitter:description" content="rasoi deli + kitchen. Order online for pickup. Cash only, pay at pickup.">
+<meta name="twitter:image" content="https://chopsticks-chaat.vercel.app/brand/rasoi/rasoi-mark-512.png">
+<link rel="icon" type="image/png" sizes="32x32" href="brand/rasoi/favicon-32.png">
+<link rel="apple-touch-icon" href="brand/rasoi/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="styles.css">
+<meta name="build" content="customer v7d (self-hosted supabase-js 2.118.0)">
+<script src="vendor/supabase-js-2.118.0.js"></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#menu">Skip to menu</a>
+
+<header class="hero" id="top">
+  <h1>rasoi · deli + kitchen — order for pickup</h1>
+  <img class="hero-mark" src="brand/rasoi/rasoi-mark.png" alt="" width="548" height="548">
+  <img class="hero-word" src="brand/rasoi/rasoi-wordmark.png" alt="rasoi deli + kitchen" width="569" height="247">
+  <ul class="facts" aria-label="How ordering works">
+    <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1 12H6L5 8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>Pickup only · no delivery</li>
+    <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/></svg>Cash only · pay at pickup</li>
+    <li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Pickup&nbsp;<span id="hours">12:00 pm – 9:00 pm</span></li>
+  </ul>
+  <p class="lede">Please order 1–2 hours ahead. We'll confirm your order shortly.</p>
+</header>
+<div id="promos"></div>
+
+<nav class="chips" id="chips" aria-label="Menu categories"></nav>
+
+<main class="menu" id="menu" tabindex="-1" aria-busy="true"></main>
+
+<section class="bulk" id="bulk" aria-label="Bulk orders"></section>
+
+<section class="bulk pts-card" id="points" aria-label="Loyalty points" hidden></section>
+
+<footer class="foot">
+  <img src="brand/rasoi/rasoi-wordmark.png" alt="rasoi deli + kitchen" width="569" height="247">
+  <p>Pickup only · cash only, pay at pickup · please order 1–2 hours ahead.</p>
+</footer>
+
+<button class="cartbar" id="cartbar" type="button" hidden>
+  <span class="cb-n" id="cb-n">0</span>
+  <span class="cb-l">View cart</span>
+  <span class="cb-a" id="cb-a">$0.00</span>
+</button>
+
+<div class="backdrop" id="backdrop" hidden></div>
+<section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden>
+  <div class="grab" aria-hidden="true"></div>
+  <button class="sheet-x" type="button" data-a="close" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  <div class="sheet-body" id="sheet-body"></div>
+  <div class="sheet-foot" id="sheet-foot"></div>
+</section>
+
+<section class="done" id="done" hidden aria-live="polite"></section>
+
+<div class="toast" id="toast" role="status" aria-live="assertive"></div>
+</body>
+</html>
