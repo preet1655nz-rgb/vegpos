@@ -1,15 +1,14 @@
-/* Chopsticks & Chaat — customer ordering app.
-   Talks to Supabase only through two public RPCs: get_public_menu() and place_customer_order(). */
+/* rasoi · deli + kitchen — customer pickup ordering app.
+   Talks to Supabase only through public RPCs: get_public_menu(), get_public_info(), get_checkout_quote(), get_points_balance(), place_customer_order().
+   Opening hours, notice, contact and loyalty rules come from the staff-editable settings table (get_public_info). */
 'use strict';
+const BRAND = { name: 'rasoi', sub: 'deli + kitchen' };
 const CFG = {
   url: 'https://sjjesqyqaikivonjuxfs.supabase.co',
   key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNqamVzcXlxYWlraXZvbmp1eGZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM2NTE0MTUsImV4cCI6MjEwOTIyNzQxNX0.5lN5mz2px5dqUUfvu2hr1kzDN_vMzafsZ5hN13cU0Ds',
   tz: 'Pacific/Auckland',
-  open: [11, 0],      // first pickup slot (NZ time)
-  close: [21, 30],    // last pickup slot (NZ time)
-  leadMins: 20,       // earliest pickup = now + lead, rounded up to the next 15 min
-  stepMins: 15,
-  days: 14,           // server accepts pickups up to 14 days ahead
+  // defaults; replaced by settings from get_public_info()
+  open: [12, 0], close: [21, 0], noticeMins: 60, stepMins: 15, days: 14, openDays: [1, 2, 3, 4, 5, 6, 7],
   cooldownSec: 60,    // one order per device per minute
   maxQty: 50
 };
@@ -25,57 +24,14 @@ const I = {
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   alert: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></svg>',
   card: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18"/></svg>',
+  cash: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v.01M18 14.5v.01"/></svg>',
+  bag: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1 12H6L5 8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9 6.8 19.6l1-5.8-4.3-4.1 5.9-.9L12 3.5Z"/></svg>',
+  tag: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12.5V4h8.5l8.5 8.5-8.5 8.5-8.5-8.5Z"/><circle cx="8" cy="8.5" r="1.4"/></svg>',
   back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>'
 };
 
-/* ---------- food illustrations (original inline SVG, no external images) ---------- */
-const G = (id, a, b) => `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient>`;
-function dumpling(x, y, s, fill, pleat) {
-  return `<g transform="translate(${x} ${y}) scale(${s})"><path d="M-34 10C-34-12-18-30 0-30S34-12 34 10c0 8-6 12-14 12h-40c-8 0-14-4-14-12Z" fill="${fill}"/>
-  <path d="M0-30c-2 8-2 14 0 22M-12-26c2 8 6 13 10 18M12-26c-2 8-6 13-10 18M-22-18c4 6 9 9 14 11M22-18c-4 6-9 9-14 11" stroke="${pleat}" stroke-width="2.4" fill="none" stroke-linecap="round"/>
-  <ellipse cx="-14" cy="0" rx="8" ry="5" fill="#fff" opacity=".35"/></g>`;
-}
-const FOOD = {
-  steamed: uid => `<svg class="food" viewBox="0 0 240 170" aria-hidden="true"><defs>${G(uid + 'b', '#D9A35B', '#9C6526')}${G(uid + 'd', '#FFFBF1', '#EBDCC0')}</defs>
-    <path d="M96 30c-6-8 6-12 0-20M120 26c-6-8 6-12 0-20M144 30c-6-8 6-12 0-20" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" opacity=".75"/>
-    <ellipse cx="120" cy="118" rx="98" ry="30" fill="url(#${uid}b)"/><path d="M22 112v14c0 17 44 30 98 30s98-13 98-30v-14" fill="#8A5620"/>
-    <path d="M30 128c20 12 54 18 90 18s70-6 90-18" stroke="#C98E45" stroke-width="3" fill="none"/>
-    <ellipse cx="120" cy="112" rx="90" ry="24" fill="#E7C891"/>
-    ${dumpling(78, 92, 1, 'url(#' + uid + 'd)', '#D2BD97')}${dumpling(162, 92, 1, 'url(#' + uid + 'd)', '#D2BD97')}${dumpling(120, 104, 1.05, 'url(#' + uid + 'd)', '#D2BD97')}
-    <circle cx="200" cy="140" r="14" fill="#C4321D"/><circle cx="200" cy="140" r="9" fill="#E2552F"/></svg>`,
-  fried: uid => `<svg class="food" viewBox="0 0 240 170" aria-hidden="true"><defs>${G(uid + 'd', '#F7C66E', '#C67A22')}${G(uid + 'p', '#FFFDF8', '#EADCC8')}</defs>
-    <ellipse cx="120" cy="128" rx="104" ry="32" fill="url(#${uid}p)"/><ellipse cx="120" cy="124" rx="86" ry="24" fill="#F4EBDD"/>
-    ${dumpling(72, 104, .95, 'url(#' + uid + 'd)', '#A85F18')}${dumpling(168, 104, .95, 'url(#' + uid + 'd)', '#A85F18')}${dumpling(120, 112, 1.05, 'url(#' + uid + 'd)', '#A85F18')}
-    <circle cx="58" cy="132" r="3" fill="#3E7A2E"/><circle cx="182" cy="134" r="3" fill="#3E7A2E"/><circle cx="150" cy="140" r="2.5" fill="#C4321D"/><circle cx="92" cy="140" r="2.5" fill="#C4321D"/></svg>`,
-  puff: uid => `<svg class="food" viewBox="0 0 240 170" aria-hidden="true"><defs>${G(uid + 'a', '#F9D387', '#D08B2C')}${G(uid + 'p', '#FFFDF8', '#EADCC8')}</defs>
-    <ellipse cx="120" cy="132" rx="104" ry="28" fill="url(#${uid}p)"/>
-    <g><path d="M40 128 92 40l52 88Z" fill="url(#${uid}a)"/><path d="M52 120l40-68 40 68" stroke="#B2701E" stroke-width="3" fill="none" opacity=".55"/><path d="M64 112l28-48 28 48" stroke="#FCE7B5" stroke-width="3" fill="none" opacity=".8"/></g>
-    <g transform="translate(64 6)"><path d="M60 124 112 44l52 80Z" fill="url(#${uid}a)"/><path d="M72 116l40-60 40 60" stroke="#B2701E" stroke-width="3" fill="none" opacity=".55"/><path d="M84 108l28-42 28 42" stroke="#FCE7B5" stroke-width="3" fill="none" opacity=".8"/></g>
-    <circle cx="74" cy="92" r="2" fill="#7A4A12"/><circle cx="182" cy="96" r="2" fill="#7A4A12"/></svg>`,
-  manchurian: uid => `<svg class="food" viewBox="0 0 240 170" aria-hidden="true"><defs>${G(uid + 'w', '#FFFDF8', '#E3D3BD')}${G(uid + 's', '#B5452B', '#6E1D10')}</defs>
-    <path d="M28 92h184c0 40-41 66-92 66S28 132 28 92Z" fill="url(#${uid}w)"/><ellipse cx="120" cy="92" rx="92" ry="20" fill="url(#${uid}s)"/>
-    ${[[80, 86], [112, 80], [146, 84], [96, 98], [132, 98], [164, 94], [70, 98]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="15" fill="#8F3418"/><circle cx="${x - 5}" cy="${y - 5}" r="4.5" fill="#E9875F" opacity=".7"/>`).join('')}
-    ${[[90, 76], [128, 72], [154, 78], [108, 94]].map(([x, y]) => `<rect x="${x}" y="${y}" width="9" height="5" rx="2.5" fill="#5DA33B" transform="rotate(-20 ${x} ${y})"/>`).join('')}
-    <path d="M104 50c-6-8 6-12 0-20M132 50c-6-8 6-12 0-20" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" opacity=".7"/></svg>`,
-  roll: uid => `<svg class="food" viewBox="0 0 240 170" aria-hidden="true"><defs>${G(uid + 'r', '#F8CF7E', '#C27A25')}${G(uid + 'p', '#FFFDF8', '#EADCC8')}</defs>
-    <ellipse cx="120" cy="130" rx="104" ry="30" fill="url(#${uid}p)"/>
-    <g transform="rotate(-14 120 100)"><rect x="34" y="82" width="150" height="34" rx="17" fill="url(#${uid}r)"/><ellipse cx="184" cy="99" rx="10" ry="17" fill="#E8B061"/><path d="M60 86l-6 26M90 86l-6 26M120 86l-6 26M150 86l-6 26" stroke="#A9631A" stroke-width="2.4" opacity=".5"/></g>
-    <g transform="rotate(10 120 110)"><rect x="56" y="98" width="150" height="34" rx="17" fill="url(#${uid}r)"/><ellipse cx="206" cy="115" rx="10" ry="17" fill="#E8B061"/><circle cx="206" cy="115" r="5" fill="#6FA845"/><path d="M82 102l-6 26M112 102l-6 26M142 102l-6 26M172 102l-6 26" stroke="#A9631A" stroke-width="2.4" opacity=".5"/></g>
-    <ellipse cx="46" cy="136" rx="20" ry="9" fill="#C4321D"/></svg>`,
-  bowl: uid => `<svg class="food" viewBox="0 0 240 170" aria-hidden="true"><defs>${G(uid + 'w', '#F1D27A', '#C99A3A')}</defs>
-    <path d="M100 50c-6-8 6-12 0-20M124 46c-6-8 6-12 0-20M148 50c-6-8 6-12 0-20" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" opacity=".75"/>
-    <path d="M30 86h180c0 40-40 66-90 66S30 126 30 86Z" fill="url(#${uid}w)"/><ellipse cx="120" cy="86" rx="90" ry="18" fill="#8E1F2F"/>
-    <circle cx="96" cy="84" r="5" fill="#F1D27A"/><circle cx="122" cy="80" r="4" fill="#F1D27A"/><circle cx="146" cy="86" r="5" fill="#F1D27A"/></svg>`
-};
-function foodFor(name) {
-  const n = name.toLowerCase();
-  if (/fried|kothey|crispy/.test(n) && /momo|dumpling/.test(n)) return ['fried', 't-fried'];
-  if (/momo|dumpling|dim sum/.test(n)) return ['steamed', 't-momos'];
-  if (/puff|patt|samosa/.test(n)) return ['puff', 't-snacks'];
-  if (/manchurian|chilli|chili|gobi/.test(n)) return ['manchurian', 't-hot'];
-  if (/roll/.test(n)) return ['roll', 't-snacks'];
-  return ['bowl', 't-maroon'];
-}
 function blurb(name) {
   const n = name.toLowerCase();
   if (/fried/.test(n) && /momo/.test(n)) return 'Golden, crispy veg momos with house chutney.';
@@ -85,9 +41,6 @@ function blurb(name) {
   if (/spring roll/.test(n)) return 'Crunchy rolls packed with stir-fried veg.';
   return 'Made fresh to order.';
 }
-let artN = 0;
-const art = (name, cls = '') => { const [k, t] = foodFor(name); return { svg: FOOD[k]('f' + (artN++)), tile: t }; };
-
 /* ---------- NZ time helpers ---------- */
 const nzFmt = new Intl.DateTimeFormat('en-NZ', { timeZone: CFG.tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 function nzParts(d) { const o = {}; for (const p of nzFmt.formatToParts(d)) o[p.type] = p.value; return { y: +o.year, m: +o.month, d: +o.day, h: +o.hour % 24, mi: +o.minute }; }
@@ -106,13 +59,17 @@ function relDay(d) {
   return d.toLocaleDateString('en-NZ', { timeZone: CFG.tz, weekday: 'short', day: 'numeric', month: 'short' });
 }
 function addDays(p, n) { const u = new Date(Date.UTC(p.y, p.m - 1, p.d + n)); return [u.getUTCFullYear(), u.getUTCMonth() + 1, u.getUTCDate()]; }
+function isoDow(y, m, d) { const w = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); return w || 7; }
 function pickupDays() {
-  const now = new Date(), p = nzParts(now), earliest = now.getTime() + CFG.leadMins * 6e4, latest = now.getTime() + CFG.days * 864e5 - 30 * 6e4, out = [];
+  const now = new Date(), p = nzParts(now), step = CFG.stepMins * 6e4;
+  const earliest = Math.ceil((now.getTime() + CFG.noticeMins * 6e4) / step) * step, latest = now.getTime() + CFG.days * 864e5 - 30 * 6e4, out = [];
   for (let i = 0; i < CFG.days; i++) {
     const [y, m, d] = addDays(p, i), slots = [];
-    for (let mins = CFG.open[0] * 60 + CFG.open[1]; mins <= CFG.close[0] * 60 + CFG.close[1]; mins += CFG.stepMins) {
-      const at = nzToDate(y, m, d, Math.floor(mins / 60), mins % 60);
-      if (at.getTime() >= earliest && at.getTime() <= latest) slots.push(at);
+    if (CFG.openDays.includes(isoDow(y, m, d))) {
+      for (let mins = CFG.open[0] * 60 + CFG.open[1]; mins <= CFG.close[0] * 60 + CFG.close[1]; mins += CFG.stepMins) {
+        const at = nzToDate(y, m, d, Math.floor(mins / 60), mins % 60);
+        if (at.getTime() >= earliest && at.getTime() <= latest) slots.push(at);
+      }
     }
     const noon = nzToDate(y, m, d, 12, 0);
     out.push({ key: `${y}-${m}-${d}`, label: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : noon.toLocaleDateString('en-NZ', { timeZone: CFG.tz, weekday: 'short' }),
@@ -120,9 +77,42 @@ function pickupDays() {
   }
   return out;
 }
+const hm12 = ([h, mi]) => fmtTime(nzToDate(2026, 1, 15, h, mi));
+const hoursText = () => `${hm12(CFG.open)} – ${hm12(CFG.close)}`;
+
+/* ---------- shop info (settings) ---------- */
+async function loadInfo() {
+  try {
+    const { data, error } = await sb.rpc('get_public_info'); if (error) throw error;
+    const tm = t => String(t || '').split(':').map(Number);
+    S.info = data;
+    if (data.open_time) CFG.open = tm(data.open_time); if (data.close_time) CFG.close = tm(data.close_time);
+    CFG.noticeMins = Number(data.min_notice_minutes ?? CFG.noticeMins); CFG.stepMins = Number(data.slot_minutes || CFG.stepMins);
+    CFG.days = Number(data.max_days_ahead || CFG.days); if (Array.isArray(data.open_days) && data.open_days.length) CFG.openDays = data.open_days.map(Number);
+  } catch (e) { S.info = S.info || null; }
+  renderInfo();
+  if (S.sheet === 'checkout') checkoutSheet();
+}
+function renderInfo() {
+  const i = S.info || {};
+  $('hours').textContent = hoursText();
+  const promos = (i.promotions || []);
+  $('promos').innerHTML = promos.map(p => `<div class="promo" role="note">${I.tag}<div><b>${esc(p.name)}</b><span>${esc(p.description || (p.kind === 'percent' ? `${Number(p.value)}% off` : `${money(p.value)} off`) + (Number(p.min_order) ? ` orders over ${money(p.min_order)}` : ''))}</span></div>${p.code ? `<button class="code" type="button" data-a="usecode" data-code="${esc(p.code)}" aria-label="Use code ${esc(p.code)} at checkout">${esc(p.code)}</button>` : ''}</div>`).join('');
+  const L = i.loyalty;
+  $('points').hidden = !(L && L.enabled);
+  if (L && L.enabled && !$('points').dataset.ready) {
+    $('points').dataset.ready = '1';
+    $('points').innerHTML = `<div class="bulk-in"><h2 class="script">Loyalty points</h2><p>Earn ${Number(L.earn_per_dollar)} point${Number(L.earn_per_dollar) === 1 ? '' : 's'} per $1 when you pay. ${Number(L.redeem_points)} points = ${money(L.redeem_value)} off, just ask us at pickup.</p>
+      <form class="coderow" id="pts-form" novalidate><label class="sr" for="pts-phone">Your phone number</label><input id="pts-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="Your phone number" value="${esc(S.form.phone || '')}"><button class="btn ghost sm" type="submit">Check points</button></form>
+      <p class="pts-out" id="pts-out" aria-live="polite"></p></div>`;
+  }
+  const ph = i.contact_phone, em = i.contact_email;
+  $('bulk').innerHTML = `<div class="bulk-in"><h2 class="script">Bulk orders</h2><p>${esc(i.bulk_note || 'Bulk orders accepted. Contact us for enquiries.')}</p>
+    ${ph || em ? `<p class="contact">${ph ? `<a href="tel:${esc(ph.replace(/[^0-9+]/g, ''))}">${esc(ph)}</a>` : ''}${ph && em ? '<span aria-hidden="true"> · </span>' : ''}${em ? `<a href="mailto:${esc(em)}?subject=${encodeURIComponent('Bulk order enquiry')}">${esc(em)}</a>` : ''}</p>` : ''}</div>`;
+}
 
 /* ---------- state ---------- */
-const S = { menu: null, cart: load('cc_cart_v1', []), form: load('cc_form_v1', { name: '', phone: '' }), sheet: null, item: null, ck: null, submitting: false };
+const S = { info: null, quote: null, menu: null, cart: load('rasoi_cart_v1', []), form: load('rasoi_form_v1', { name: '', phone: '' }), sheet: null, item: null, ck: null, submitting: false };
 function load(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } }
 function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
 const prod = id => S.menu && S.menu.find(p => p.id === id);
@@ -148,7 +138,7 @@ function friendly(e) {
 function skeleton() {
   $('chips').innerHTML = Array.from({ length: 3 }, () => '<span class="chip sk" aria-hidden="true"></span>').join('');
   $('menu').innerHTML = `<div class="sec"><div class="sk" style="height:24px;width:140px;margin:10px 2px 16px"></div><div class="grid">${Array.from({ length: 4 }, () =>
-    '<div class="sk-card" aria-hidden="true"><div class="sk a"></div><div class="sk l"></div><div class="sk l2"></div></div>').join('')}</div></div>`;
+    '<div class="sk-card" aria-hidden="true"><div class="sk l"></div><div class="sk l2"></div></div>').join('')}</div></div>`;
 }
 async function loadMenu(quiet) {
   try {
@@ -174,22 +164,20 @@ function renderMenu() {
   if (!S.menu.length) { $('chips').innerHTML = ''; m.innerHTML = '<div class="empty"><b>The menu is being updated</b>Please check back soon.</div>'; return; }
   const cs = cats();
   $('chips').innerHTML = cs.map((c, i) => `<button class="chip ${i === 0 ? 'on' : ''}" type="button" data-a="cat" data-c="${esc(slug(c))}">${esc(c)}</button>`).join('');
-  artN = 0;
   m.innerHTML = cs.map(c => {
     const ps = S.menu.filter(p => p.category === c);
-    return `<section class="sec" id="${esc(slug(c))}" aria-labelledby="${esc(slug(c))}-h"><h2 id="${esc(slug(c))}-h">${esc(c)}</h2><div class="grid">${ps.map(cardHTML).join('')}</div></section>`;
+    return `<section class="sec" id="${esc(slug(c))}" aria-labelledby="${esc(slug(c))}-h"><h2 class="script" id="${esc(slug(c))}-h">${esc(c)}</h2><div class="grid">${ps.map(cardHTML).join('')}</div></section>`;
   }).join('');
   spy();
 }
 function cardHTML(p, i) {
-  const a = art(p.name), avail = p.variants.filter(v => v.available), from = Math.min(...(avail.length ? avail : p.variants).map(v => v.price));
+  const avail = p.variants.filter(v => v.available), from = Math.min(...(avail.length ? avail : p.variants).map(v => v.price));
   const inCart = S.cart.filter(l => l.pid === p.id).reduce((s, l) => s + l.qty, 0), so = !p.in_stock;
   return `<button class="card ${so ? 'soldout' : ''}" type="button" data-a="item" data-id="${p.id}" style="animation-delay:${i * 40}ms"
       aria-label="${esc(p.name)}${so ? ', sold out' : `, from ${money(from)}`}${inCart ? `, ${inCart} in cart` : ''}">
-    <div class="art ${a.tile}">${a.svg}${so ? '<span class="badge-so">Sold out</span>' : ''}${inCart ? `<span class="incart">${inCart} in cart</span>` : ''}</div>
-    <div class="info"><span class="nm">${esc(p.name)}</span><span class="ds">${esc(blurb(p.name))}</span>
-      <span class="row"><span class="from">${so ? '<small>Sold out today</small>' : `<small>${p.variants.length > 1 ? 'from' : ''}</small>${money(from)}`}</span>
-      <span class="add" aria-hidden="true">${I.plus}</span></span></div></button>`;
+    <span class="info"><span class="nm">${esc(p.name)}${inCart ? `<span class="incart">${inCart} in cart</span>` : ''}</span><span class="ds">${esc(blurb(p.name))}</span>
+      <span class="vs">${p.variants.map(v => `<span class="${v.available ? '' : 'x'}">${esc(v.label)} ${money(v.price)}</span>`).join('')}</span></span>
+    <span class="end">${so ? '<span class="badge-so">Sold out</span>' : `<span class="from">${p.variants.length > 1 ? '<small>from</small>' : ''}${money(from)}</span><span class="add" aria-hidden="true">${I.plus}</span>`}</span></button>`;
 }
 let spyObs;
 function spy() {
@@ -211,7 +199,7 @@ function updateBar() {
   b.setAttribute('aria-label', `View cart, ${n} item${n === 1 ? '' : 's'}, ${money(cartTotal())}`);
   b.querySelector('.cb-l').textContent = `View cart · ${n} item${n === 1 ? '' : 's'}`;
 }
-function saveCart() { save('cc_cart_v1', S.cart); }
+function saveCart() { save('rasoi_cart_v1', S.cart); }
 function bump() { const b = $('cartbar'); b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
 
 /* ---------- sheet ---------- */
@@ -249,11 +237,10 @@ function openItem(id) {
 }
 function itemSheet() {
   const p = prod(S.item.id); if (!p) return closeSheet();
-  const a = art(p.name), v = p.variants.find(x => x.index === S.item.vidx);
+  const v = p.variants.find(x => x.index === S.item.vidx);
   if (v && !v.available) { const f = p.variants.find(x => x.available); S.item.vidx = f ? f.index : null; }
   const sel = p.variants.find(x => x.index === S.item.vidx);
-  $('sheet-body').innerHTML = `<div class="sh-art ${a.tile}">${a.svg}</div>
-    <h2 class="sh-title" id="sh-title">${esc(p.name)}</h2><p class="sh-sub">${esc(blurb(p.name))}</p>
+  $('sheet-body').innerHTML = `<h2 class="sh-title" id="sh-title">${esc(p.name)}</h2><p class="sh-sub">${esc(blurb(p.name))}</p>
     <div class="sh-h" id="opt-h">Choose a size <small>Required</small></div>
     <div class="opts" role="radiogroup" aria-labelledby="opt-h">${p.variants.map(x => `<label class="opt ${x.index === S.item.vidx ? 'on' : ''} ${x.available ? '' : 'so'}">
       <input type="radio" name="var" value="${x.index}" ${x.index === S.item.vidx ? 'checked' : ''} ${x.available ? '' : 'disabled'} data-a="var">
@@ -276,18 +263,44 @@ function cartSheet() {
     $('sheet-body').innerHTML = `<h2 class="sh-title" id="sh-title">Your cart</h2><div class="empty"><b>Your cart is empty</b>Add something tasty from the menu.</div>`;
     $('sheet-foot').innerHTML = `<button class="btn ghost" type="button" data-a="close">Browse the menu</button>`; return;
   }
-  artN = 100;
-  $('sheet-body').innerHTML = `<h2 class="sh-title" id="sh-title">Your cart</h2><p class="sh-sub">Pickup order · Chopsticks &amp; Chaat</p>
-    <div class="lines">${S.cart.map((l, i) => { const p = prod(l.pid), v = lineVar(l), a = art(p.name); return `<div class="line">
-      <div class="th ${a.tile}">${a.svg}</div><div class="ln"><b>${esc(p.name)}</b><small>${esc(v.label)} · ${money(v.price)} each</small><div class="lp">${money(v.price * l.qty)}</div></div>
+  $('sheet-body').innerHTML = `<h2 class="sh-title" id="sh-title">Your cart</h2><p class="sh-sub">Pickup order · rasoi deli + kitchen</p>
+    <div class="lines">${S.cart.map((l, i) => { const p = prod(l.pid), v = lineVar(l); return `<div class="line">
+      <div class="ln"><b>${esc(p.name)}</b><small>${esc(v.label)} · ${money(v.price)} each</small><div class="lp">${money(v.price * l.qty)}</div></div>
       ${stepper(l.qty, 0, CFG.maxQty, 'lq', `data-i="${i}"`, `Quantity of ${esc(p.name)} ${esc(v.label)}`)}</div>`; }).join('')}</div>
     <button class="linkbtn" type="button" data-a="close" style="margin-top:8px">+ Add more items</button>
     <div class="totals"><div><span>Subtotal</span><span class="num">${money(cartTotal())}</span></div><div class="g"><span>Total</span><span class="num">${money(cartTotal())}</span></div></div>
-    <div class="note">${I.card}<span><b>Pay at pickup.</b> No payment needed now — pay when you collect your order.</span></div>`;
+    ${cashNote()}`;
   $('sheet-foot').innerHTML = `<button class="btn split" type="button" data-a="checkout"><span>Go to checkout</span><span class="num">${money(cartTotal())}</span></button>`;
 }
 
+const cashNote = () => `<div class="note">${I.cash}<span><b>Cash only · pay at pickup.</b> Pickup only, no delivery. Please order 1–2 hours ahead.</span></div>`;
 /* checkout sheet */
+const quoteTotal = () => S.quote && S.quote.promo && S.quote.promo.ok ? Math.max(cartTotal() - Number(S.quote.promo.discount || 0), 0) : cartTotal();
+function quoteHTML() {
+  const q = S.quote, pr = q && q.promo, L = S.info && S.info.loyalty, n = S.pts;
+  const pts = n != null && L && L.enabled ? `<div class="pts">${I.star}<span>You have <b>${Number(n)}</b> point${Number(n) === 1 ? '' : 's'}${q && Number(q.earn) ? ` · earn about ${Number(q.earn)} more when you pay for this order` : ''}. ${Number(L.redeem_points)} points = ${money(L.redeem_value)} off (ask us at pickup).</span></div>` : '';
+  return `${pr ? `<div class="promo-msg ${pr.ok ? 'ok' : 'bad'}" role="status">${pr.ok ? `${I.check}<span><b>${esc(pr.code)}</b> applied · ${esc(pr.name)} · −${money(pr.discount)}</span>` : `${I.alert}<span>${esc(pr.message)}</span>`}</div>` : ''}
+    <div class="totals"><div><span>Subtotal</span><span class="num">${money(cartTotal())}</span></div>
+      ${pr && pr.ok ? `<div><span>Promo ${esc(pr.code)}</span><span class="num">−${money(pr.discount)}</span></div>` : ''}
+      <div class="g"><span>Total · cash at pickup</span><span class="num">${money(quoteTotal())}</span></div></div>${pts}`;
+}
+let quoteT, quoteSeq = 0;
+async function refreshQuote(now) {
+  clearTimeout(quoteT);
+  const run = async () => {
+    const code = (S.ck && S.ck.code || '').trim(), phone = (S.form.phone || '').trim(), seq = ++quoteSeq, okPhone = /^\+?[0-9 ()-]{6,20}$/.test(phone);
+    if (!code && !okPhone) { S.quote = null; S.pts = null; const z = $('quote'); if (z) z.innerHTML = quoteHTML(); updatePlace(); return; }
+    try {
+      const [qr, pr] = await Promise.all([
+        sb.rpc('get_checkout_quote', { p_items: S.cart.map(l => ({ product_id: l.pid, variant: l.label, qty: l.qty })), p_promo_code: code || null }),
+        okPhone ? sb.rpc('get_points_balance', { p_phone: phone }) : Promise.resolve({ data: null })]);
+      if (qr.error) throw qr.error; if (seq !== quoteSeq) return;
+      S.quote = qr.data; S.pts = pr && !pr.error ? pr.data : null; const z = $('quote'); if (z) z.innerHTML = quoteHTML(); updatePlace();
+    } catch (e) { }
+  };
+  if (now) return run(); quoteT = setTimeout(run, 600);
+}
+function updatePlace() { const n = document.querySelector('#place .num'); if (n) n.textContent = money(quoteTotal()); }
 function checkoutSheet() {
   const days = pickupDays().filter(d => d.slots.length);
   if (!S.ck) S.ck = {};
@@ -297,21 +310,26 @@ function checkoutSheet() {
   const f = S.form;
   $('sheet').setAttribute('aria-labelledby', 'sh-title');
   $('sheet-body').innerHTML = `<button class="linkbtn" type="button" data-a="cart" style="margin:6px 0 -6px -6px;display:inline-flex;align-items:center;gap:4px">${I.back}Cart</button>
-    <h2 class="sh-title" id="sh-title">Checkout</h2><p class="sh-sub">${cartCount()} item${cartCount() === 1 ? '' : 's'} · ${money(cartTotal())} · pay at pickup</p>
+    <h2 class="sh-title" id="sh-title">Checkout</h2><p class="sh-sub">${cartCount()} item${cartCount() === 1 ? '' : 's'} · pickup only · cash at pickup</p>
     <form id="ck" novalidate>
       <div class="f"><label for="ck-name">Your name</label><input id="ck-name" name="name" autocomplete="name" maxlength="80" required value="${esc(f.name)}" placeholder="So we can call you at the counter"></div>
-      <div class="f"><label for="ck-phone">Phone <small>(optional)</small></label><input id="ck-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" value="${esc(f.phone)}" placeholder="e.g. 021 123 4567"></div>
+      <div class="f"><label for="ck-phone">Phone <small>(optional · for loyalty points)</small></label><input id="ck-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" value="${esc(f.phone)}" placeholder="e.g. 021 123 4567"></div>
       <div class="hp" aria-hidden="true"><label for="ck-web">Leave this empty</label><input id="ck-web" name="website" tabindex="-1" autocomplete="off"></div>
-      <div class="f"><label id="day-l">Pickup time <small>(NZ time)</small></label>
-        ${days.length ? `<div class="days" style="display:flex;overflow-x:auto;gap:8px;scrollbar-width:none" role="radiogroup" aria-labelledby="day-l">${days.map(d => `<button type="button" class="day ${d.key === S.ck.day ? 'on' : ''}" role="radio" aria-checked="${d.key === S.ck.day}" data-a="day" data-k="${d.key}" style="flex:none;min-width:92px;padding:0 12px">${d.label}<small>${d.sub}</small></button>`).join('')}</div>
-        <div class="slots" role="radiogroup" aria-label="Pickup time on ${esc(day.label)}">${day.slots.map((s, i) => `<button type="button" class="slot ${s.toISOString() === S.ck.slot ? 'on' : ''}" role="radio" aria-checked="${s.toISOString() === S.ck.slot}" data-a="slot" data-t="${s.toISOString()}">${i === 0 && day.label === 'Today' ? '<span class="asap">Earliest</span>' : ''}${fmtTime(s)}</button>`).join('')}</div>`
+      <div class="f"><label id="day-l">Pickup time <small>(NZ time · ${esc(hoursText())})</small></label>
+        <p class="hint">${I.clock}<span>Please order 1–2 hours ahead. The earliest pickup is ${CFG.noticeMins >= 60 && CFG.noticeMins % 60 === 0 ? `${CFG.noticeMins / 60} hour${CFG.noticeMins === 60 ? '' : 's'}` : `${CFG.noticeMins} minutes`} from now.</span></p>
+        ${days.length ? `<div class="days" role="radiogroup" aria-labelledby="day-l">${days.map(d => `<button type="button" class="day ${d.key === S.ck.day ? 'on' : ''}" role="radio" aria-checked="${d.key === S.ck.day}" data-a="day" data-k="${d.key}">${d.label}<small>${d.sub}</small></button>`).join('')}</div>
+        <div class="slots" role="radiogroup" aria-label="Pickup time on ${esc(day.label)}">${day.slots.map((s, i) => `<button type="button" class="slot ${s.toISOString() === S.ck.slot ? 'on' : ''}" role="radio" aria-checked="${s.toISOString() === S.ck.slot}" data-a="slot" data-t="${s.toISOString()}">${i === 0 ? '<span class="asap">Earliest</span>' : ''}${fmtTime(s)}</button>`).join('')}</div>`
         : '<div class="note">No pickup times are available right now.</div>'}</div>
+      <div class="f"><label for="ck-code">Promo code <small>(optional)</small></label><div class="coderow"><input id="ck-code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="24" value="${esc(S.ck.code || '')}" placeholder="e.g. WELCOME10"><button class="btn ghost sm" type="button" data-a="applycode">Apply</button></div></div>
       <div class="f"><label for="ck-notes">Notes <small>(optional)</small></label><textarea id="ck-notes" name="notes" maxlength="300" placeholder="Allergies, extra chutney, etc.">${esc(S.ck.notes || '')}</textarea></div>
-      <div class="note">${I.card}<span><b>Pay at pickup.</b> Your order is confirmed straight away; just pay when you collect.</span></div>
+      <div id="quote" aria-live="polite">${quoteHTML()}</div>
+      <div class="note">${I.cash}<span><b>Cash only · pay at pickup.</b> We'll confirm your order shortly. Pickup only, no delivery.</span></div>
     </form>`;
-  $('sheet-foot').innerHTML = `<button class="btn split" type="button" data-a="place" id="place" ${S.submitting || !days.length ? 'disabled' : ''}>${S.submitting ? '<span class="spin" aria-hidden="true"></span><span>Placing order…</span><span></span>' : `<span>Place order</span><span class="num">${money(cartTotal())}</span>`}</button>`;
-  const keep = () => { S.form.name = $('ck-name').value; S.form.phone = $('ck-phone').value; S.ck.notes = $('ck-notes').value; save('cc_form_v1', S.form); };
-  ['ck-name', 'ck-phone', 'ck-notes'].forEach(id => $(id).addEventListener('input', e => { keep(); e.target.removeAttribute('aria-invalid'); }));
+  $('sheet-foot').innerHTML = `<button class="btn split" type="button" data-a="place" id="place" ${S.submitting || !days.length ? 'disabled' : ''}>${S.submitting ? '<span class="spin" aria-hidden="true"></span><span>Placing order…</span><span></span>' : `<span>Place pickup order</span><span class="num">${money(quoteTotal())}</span>`}</button>`;
+  const keep = () => { S.form.name = $('ck-name').value; S.form.phone = $('ck-phone').value; S.ck.notes = $('ck-notes').value; save('rasoi_form_v1', S.form); };
+  ['ck-name', 'ck-phone', 'ck-notes'].forEach(id => $(id).addEventListener('input', e => { keep(); e.target.removeAttribute('aria-invalid'); if (id === 'ck-phone') refreshQuote(); }));
+  $('ck-code').addEventListener('input', e => { S.ck.code = e.target.value.toUpperCase(); if (!S.ck.code) { if (S.quote) S.quote.promo = null; $('quote').innerHTML = quoteHTML(); updatePlace(); } });
+  $('ck-code').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); refreshQuote(true); } });
   const sel = $('sheet-body').querySelector('.slot.on'); if (sel) sel.scrollIntoView({ block: 'nearest' });
 }
 
@@ -323,34 +341,37 @@ async function placeOrder() {
   if (phone && !/^\+?[0-9 ()-]{6,20}$/.test(phone)) { $('ck-phone').setAttribute('aria-invalid', 'true'); $('ck-phone').focus(); return toast('Phone number looks invalid', true); }
   if (!S.ck.slot) return toast('Please choose a pickup time', true);
   if (new Date(S.ck.slot).getTime() < Date.now() - 60e3) { checkoutSheet(); return toast('That pickup time has passed — please pick another', true); }
-  const last = Number(localStorage.getItem('cc_last_order_at') || 0), wait = Math.ceil((last + CFG.cooldownSec * 1e3 - Date.now()) / 1e3);
+  const last = Number(localStorage.getItem('rasoi_last_order_at') || 0), wait = Math.ceil((last + CFG.cooldownSec * 1e3 - Date.now()) / 1e3);
   if (wait > 0) return toast(`You just placed an order. Please wait ${wait}s before placing another.`, true);
   S.submitting = true; checkoutSheet();
   try {
     const items = S.cart.map(l => ({ product_id: l.pid, variant: l.label, variant_index: l.vidx, qty: l.qty }));
-    const { data, error } = await sb.rpc('place_customer_order', { p_customer_name: name, p_customer_phone: phone || null, p_pickup_time: S.ck.slot, p_items: items, p_notes: notes || null });
+    const code = (S.ck.code || '').trim().toUpperCase();
+    const { data, error } = await sb.rpc('place_customer_order', { p_customer_name: name, p_customer_phone: phone || null, p_pickup_time: S.ck.slot, p_items: items, p_notes: notes || null, p_promo_code: code || null });
     if (error) throw error;
-    localStorage.setItem('cc_last_order_at', String(Date.now()));
+    localStorage.setItem('rasoi_last_order_at', String(Date.now()));
     const summary = { ...data, name, count: cartCount() };
-    save('cc_last_order', summary);
-    S.cart = []; saveCart(); S.ck = null; S.submitting = false;
+    save('rasoi_last_order', summary);
+    S.cart = []; saveCart(); S.ck = null; S.quote = null; S.submitting = false;
     closeSheet(); showDone(summary); loadMenu(true);
   } catch (e) {
     S.submitting = false; checkoutSheet(); const msg = friendly(e); toast(msg, true);
     if (/not enough|not available|sold out/i.test(msg)) loadMenu(true);
+    if (/ahead|opening hours|closed on/i.test(msg)) loadInfo();
   }
 }
 
 /* confirmation */
 function showDone(o) {
   const d = new Date(o.pickup_time), el = $('done');
-  el.innerHTML = `<div class="tick">${I.check}</div><h2 tabindex="-1" id="done-h">Order placed!</h2>
-    <p class="lead">Thanks ${esc(o.name)} — we've got it and we'll have it hot &amp; ready for you.</p>
+  el.innerHTML = `<img class="done-logo" src="brand/rasoi/rasoi-mark.png" alt="" width="96" height="96"><h2 class="script" tabindex="-1" id="done-h">Thank you!</h2>
+    <p class="lead">Thanks ${esc(o.name)}, we've received your order. We'll confirm your order shortly. Pay cash at pickup.</p>
     <div class="ticket" role="group" aria-label="Order summary"><div class="no">Order number</div><div class="big num">#${esc(o.order_no)}</div>
-      <div class="kv"><span>Pickup</span><b>${esc(relDay(d))} · ${esc(fmtTime(d))}<br><small style="font-weight:500;color:var(--ink2)">${esc(fmtDayLong(d))}</small></b></div>
+      <div class="kv"><span>Pickup</span><b>${esc(relDay(d))} · ${esc(fmtTime(d))}<br><small>${esc(fmtDayLong(d))}</small></b></div>
       <div class="kv"><span>Items</span><b>${o.count}</b></div>
-      <div class="kv"><span>Total</span><b class="num" style="font-size:20px">${money(o.total)}</b></div>
-      <div class="pay">${I.card}<span>Pay at pickup — please show this order number at the counter.</span></div></div>
+      ${Number(o.discount) ? `<div class="kv"><span>Promo ${esc(o.promo_code || '')}</span><b class="num">−${money(o.discount)}</b></div>` : ''}
+      <div class="kv"><span>Total</span><b class="num big2">${money(o.total)}</b></div>
+      <div class="pay">${I.cash}<span><b>Cash only · pay at pickup.</b> Please show this order number at the counter. Pickup only, no delivery.</span></div></div>
     <div class="again"><button class="btn ghost" type="button" data-a="again">Start a new order</button></div>`;
   el.hidden = false; document.body.classList.add('locked'); updateBar(); buzz();
   setTimeout(() => $('done-h').focus({ preventScroll: true }), 50);
@@ -367,11 +388,13 @@ document.addEventListener('click', e => {
   else if (a === 'iq') { S.item.qty = Math.max(1, Math.min(CFG.maxQty, S.item.qty + +t.dataset.d)); buzz(); itemSheet(); }
   else if (a === 'addItem') addItem();
   else if (a === 'lq') { const l = S.cart[+t.dataset.i]; if (!l) return; l.qty += +t.dataset.d; if (l.qty <= 0) S.cart.splice(+t.dataset.i, 1); else l.qty = Math.min(CFG.maxQty, l.qty); saveCart(); buzz(); cartSheet(); updateBar(); }
-  else if (a === 'checkout') { S.ck = S.ck || {}; openSheet('checkout'); }
+  else if (a === 'checkout') { S.ck = S.ck || {}; openSheet('checkout'); refreshQuote(true); }
   else if (a === 'cart') openSheet('cart');
   else if (a === 'day') { S.ck.day = t.dataset.k; S.ck.slot = null; checkoutSheet(); }
   else if (a === 'slot') { S.ck.slot = t.dataset.t; buzz(); document.querySelectorAll('.slot').forEach(s => { const on = s === t; s.classList.toggle('on', on); s.setAttribute('aria-checked', on); }); }
   else if (a === 'place') placeOrder();
+  else if (a === 'applycode') { S.ck.code = ($('ck-code').value || '').trim().toUpperCase(); if (!S.ck.code) return toast('Enter a promo code', true); refreshQuote(true); }
+  else if (a === 'usecode') { try { navigator.clipboard && navigator.clipboard.writeText(t.dataset.code); } catch (x) { } S.ck = S.ck || {}; S.ck.code = t.dataset.code; toast(`Code ${t.dataset.code} will be applied at checkout`); }
   else if (a === 'again') { $('done').hidden = true; document.body.classList.remove('locked'); updateBar(); window.scrollTo({ top: 0 }); }
 });
 document.addEventListener('change', e => { if (e.target.dataset.a === 'var') { S.item.vidx = +e.target.value; itemSheet(); const r = document.querySelector('.opt input:checked'); r && r.focus(); } });
@@ -386,7 +409,17 @@ document.addEventListener('keydown', e => {
     if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
   }
 });
-document.addEventListener('submit', e => { e.preventDefault(); placeOrder(); });
+document.addEventListener('submit', e => { e.preventDefault(); if (e.target.id === 'pts-form') checkPoints(); else placeOrder(); });
+async function checkPoints() {
+  const ph = ($('pts-phone').value || '').trim(), out = $('pts-out');
+  if (!/^\+?[0-9 ()-]{6,20}$/.test(ph)) { out.textContent = 'Please enter a valid phone number.'; return; }
+  out.textContent = 'Checking…';
+  try {
+    const { data, error } = await sb.rpc('get_points_balance', { p_phone: ph }); if (error) throw error;
+    const L = (S.info && S.info.loyalty) || {}, n = Number(data || 0);
+    out.innerHTML = `You have <b>${n}</b> point${n === 1 ? '' : 's'}.${n >= Number(L.redeem_points || 100) ? ` That's ${money(Math.floor(n / Number(L.redeem_points)) * Number(L.redeem_value))} off. Ask us at pickup.` : ''}`;
+  } catch (e) { out.textContent = friendly(e); }
+}
 // swipe the sheet down to close
 (() => {
   let y0 = null, dy = 0; const sh = $('sheet');
@@ -395,8 +428,9 @@ document.addEventListener('submit', e => { e.preventDefault(); placeOrder(); });
   sh.addEventListener('touchend', () => { if (y0 === null) return; sh.style.transition = ''; sh.style.transform = ''; if (dy > 110) closeSheet(); y0 = null; });
 })();
 window.addEventListener('scroll', () => $('chips').classList.toggle('stuck', $('chips').getBoundingClientRect().top <= 1), { passive: true });
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.menu) loadMenu(true); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.menu) { loadMenu(true); loadInfo(); } });
 setInterval(() => { if (!document.hidden && !S.submitting) loadMenu(true); }, 60e3);
 setInterval(() => { if (S.sheet === 'checkout' && !S.submitting) { const y = $('sheet-body').scrollTop; checkoutSheet(); $('sheet-body').scrollTop = y; } }, 5 * 60e3);
 
-skeleton(); updateBar(); loadMenu();
+renderInfo(); skeleton(); updateBar(); loadInfo(); loadMenu();
+setInterval(() => { if (!document.hidden) loadInfo(); }, 5 * 60e3);

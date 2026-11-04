@@ -1,11 +1,11 @@
-/* Chopsticks & Chaat staff app (internal name: VegPOS) — live-synced orders, inventory & sales. Static, no build step. */
+/* rasoi · deli + kitchen staff app (internal name: VegPOS) — live-synced orders, inventory & sales. Static, no build step. */
 'use strict';
 const SB_URL = 'https://sjjesqyqaikivonjuxfs.supabase.co';
 // Public "anon" key — safe in the browser. Row Level Security only lets signed-in, allowlisted staff read/write.
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNqamVzcXlxYWlraXZvbmp1eGZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM2NTE0MTUsImV4cCI6MjEwOTIyNzQxNX0.5lN5mz2px5dqUUfvu2hr1kzDN_vMzafsZ5hN13cU0Ds';
 const TZ = 'Pacific/Auckland';
-/* Brand. To use a real logo, replace brand/logo.svg (and brand/apple-touch-icon.png) — same file names, nothing else to change. */
-const BRAND = { name: 'Chopsticks & Chaat', tagline: 'Desi. Crispy. Zingy.', logo: 'brand/logo.svg' };
+/* Brand: Preet's final logo file, unmodified, plus straight pixel crops of it (see brand/rasoi/README.md). */
+const BRAND = { name: 'rasoi', tagline: 'DELI + KITCHEN', logo: 'brand/rasoi/rasoi-mark.png', word: 'brand/rasoi/rasoi-wordmark.png' };
 
 /* "Remember me": the Supabase session lives in localStorage (stays signed in across visits/tabs, tokens auto-refresh)
    or, when unticked, in sessionStorage (this tab only). We never store the password — the browser's password manager
@@ -53,6 +53,7 @@ const IC = {
   logout: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>', bag: '<path d="M5 8h14l-1 12H6z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
   card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>', cash: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>', arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  star: '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9 6.8 19.6l1-5.8-4.3-4.1 5.9-.9z"/>', tag: '<path d="M3.5 12.5V4h8.5l8.5 8.5-8.5 8.5z"/><circle cx="8" cy="8.5" r="1.4"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>', lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
 };
 const icon = (n, c = '') => `<svg class="i ${c}" viewBox="0 0 24 24" aria-hidden="true">${IC[n] || ''}</svg>`;
@@ -94,20 +95,37 @@ function relLabel(m) { const a = Math.abs(m); const s = a < 60 ? `${a} min` : a 
 const STATUSES = ['pending', 'preparing', 'ready', 'completed'];
 const ST_LABEL = { pending: 'Pending', preparing: 'Preparing', ready: 'Ready', completed: 'Completed', cancelled: 'Cancelled' };
 const NEXT = { pending: 'preparing', preparing: 'ready', ready: 'completed' };
-const NEXT_LABEL = { pending: 'Start preparing', preparing: 'Mark ready', ready: 'Complete order' };
+const NEXT_LABEL = { pending: 'Accept order', preparing: 'Mark ready', ready: 'Complete order' };
 const PAY = { cash: 'Cash', card: 'Card', online: 'Online' };
 const REASON = { order: 'Order', order_edit: 'Order edited', order_cancel: 'Order cancelled', order_restore: 'Order restored', restock: 'Restock', waste: 'Waste', correction: 'Correction', set: 'Set', initial: 'Opening stock' };
 const S = {
   session: null, me: null, started: false, recovery: false,
-  products: [], pools: [], orders: [], moves: [], staff: [], settings: { business_name: BRAND.name, low_stock_default: 10 },
+  products: [], pools: [], orders: [], moves: [], staff: [], customers: [], promos: [], settings: { business_name: BRAND.name, low_stock_default: 10 },
   tab: 'orders', live: 'connecting',
   of: { seg: 'active', q: '', date: '' }, inv: { seg: 'all', q: '', mode: 'items' }, ins: { range: 'today', from: '', to: '' },
   cart: null, cat: 'All', sheet: null
 };
 function newCart() {
-  const t = Math.ceil((Date.now() + 20 * 60000) / 300000) * 300000;
-  return { id: null, no: null, items: [], customer: '', phone: '', date: dayKey(t), time: hm(t), notes: '', payment: 'cash', paid: false, discount: '' };
+  const t = Math.ceil(Date.now() / 300000) * 300000; // walk-in: now (rounded to 5 min); change with the quick buttons
+  return { id: null, no: null, items: [], customer: '', phone: '', date: dayKey(t), time: hm(t), notes: '', payment: 'cash', paid: false, discount: '', promo: '', points: 0 };
 }
+/* loyalty + promotions helpers */
+const normPhone = p => { const d = String(p || '').replace(/[^0-9]/g, ''); if (d.length < 6) return null; return d.startsWith('64') && d.length >= 9 ? '0' + d.slice(2) : d; };
+const custByPhone = p => { const n = normPhone(p); return n ? S.customers.find(c => c.phone === n) || null : null; };
+const L = () => ({ on: S.settings.loyalty_enabled !== false, earn: Number(S.settings.loyalty_earn_per_dollar ?? 1), blk: Number(S.settings.loyalty_redeem_points || 100), val: Number(S.settings.loyalty_redeem_value ?? 10) });
+const promoByCode = c => S.promos.find(p => !p.archived && p.code === String(c || '').trim().toUpperCase()) || null;
+function promoProblem(p, amount) {
+  if (!p) return "Sorry, that promo code isn't recognised";
+  if (!p.active) return "Sorry, that promo code isn't active right now";
+  if (p.starts_at && new Date(p.starts_at) > new Date()) return `That promo code starts on ${fmtDay(dayKey(p.starts_at))}`;
+  if (p.ends_at && new Date(p.ends_at) <= new Date()) return 'Sorry, that promo code has expired';
+  if (p.usage_limit != null && p.used_count >= p.usage_limit) return 'Sorry, that promo code has been fully used';
+  if (amount < Number(p.min_order || 0)) return `Spend at least ${money(p.min_order)} to use this code`;
+  return null;
+}
+const promoAmt = (p, a) => !p || a <= 0 ? 0 : p.kind === 'percent' ? Math.min(r2(a * Number(p.value) / 100), a) : Math.min(Number(p.value), a);
+const promoLabel = p => p.kind === 'percent' ? `${Number(p.value)}% off` : `${money(p.value)} off`;
+const cashKept = o => Number(o.total || 0) + Number(o.tip || 0);
 S.cart = newCart();
 const isOwner = () => S.me && S.me.role === 'owner';
 const prodById = id => S.products.find(p => p.id === id);
@@ -201,7 +219,7 @@ const appURL = () => location.origin + location.pathname;
 function showAuth(mode, msg, ok) {
   $('boot').hidden = true; $('shell').hidden = true; $('auth').hidden = false; closeSheet();
   const m = msg ? `<div class="msg ${ok ? 'ok' : 'err'}">${msg}</div>` : '';
-  const head = (t, s) => `<div class="brand-hero"><img class="brand-logo" src="${BRAND.logo}" alt="" width="88" height="88"><div class="brand-name">${esc(bizName())}</div><div class="brand-tag">${esc(BRAND.tagline)}</div></div>${t ? `<h1>${t}</h1>` : ''}<p class="lead">${s}</p>${m}`;
+  const head = (t, s) => `<div class="brand-hero"><img class="brand-logo" src="${BRAND.logo}" alt="" width="120" height="120"><img class="brand-word" src="${BRAND.word}" alt="rasoi deli + kitchen" width="569" height="247"><div class="brand-sub">Staff</div></div>${t ? `<h1>${t}</h1>` : ''}<p class="lead">${s}</p>${m}`;
   if (S.remember === undefined) S.remember = true; // ticked by default on every fresh sign-in screen
   if (!S.authEmail && ls) S.authEmail = ls.getItem(EMAIL_KEY) || ''; // only saved when the last sign-in was remembered
   const email = `<div class="field"><label for="a-email">Email</label><input id="a-email" name="username" type="email" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="email" placeholder="you@example.com" value="${esc(S.authEmail || '')}" required></div>`;
@@ -260,19 +278,21 @@ async function authSubmit(form) {
 /* ---------- data ---------- */
 async function q(p) { const { data, error } = await p; if (error) throw error; return data; }
 async function loadAll() {
-  const [products, orders, moves, settings, staff, pools] = await Promise.all([
+  const [products, orders, moves, settings, staff, pools, customers, promos] = await Promise.all([
     q(sb.from('products').select('*').order('sort_order').order('product_no')),
     q(sb.from('orders').select('*').order('pickup_time', { ascending: false }).limit(5000)),
     q(sb.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(400)),
     q(sb.from('settings').select('*').eq('id', 1).maybeSingle()),
     q(sb.from('staff').select('*').order('created_at')),
-    q(sb.from('stock_items').select('*').order('sort_order').order('name'))
+    q(sb.from('stock_items').select('*').order('sort_order').order('name')),
+    q(sb.from('customers').select('*').order('last_order_at', { ascending: false, nullsFirst: false }).limit(5000)),
+    q(sb.from('promotions').select('*').order('created_at', { ascending: false }))
   ]);
-  Object.assign(S, { products, orders, moves, staff, pools }); if (settings) S.settings = settings;
+  Object.assign(S, { products, orders, moves, staff, pools, customers, promos }); if (settings) S.settings = settings;
   S.me = staff.find(s => s.email === (S.session?.user?.email || '').toLowerCase()) || null;
 }
-const KEY = { orders: 'id', products: 'id', stock_movements: 'id', staff: 'email', settings: 'id', stock_items: 'id' };
-const LIST = { orders: 'orders', products: 'products', stock_movements: 'moves', staff: 'staff', stock_items: 'pools' };
+const KEY = { orders: 'id', products: 'id', stock_movements: 'id', staff: 'email', settings: 'id', stock_items: 'id', customers: 'id', promotions: 'id' };
+const LIST = { orders: 'orders', products: 'products', stock_movements: 'moves', staff: 'staff', stock_items: 'pools', customers: 'customers', promotions: 'promos' };
 function applyRow(table, row, del) {
   if (table === 'settings') { if (!del && row) S.settings = row; return; }
   const k = KEY[table], arr = S[LIST[table]], i = arr.findIndex(x => x[k] === row[k]);
@@ -322,6 +342,7 @@ function newOrderAlert(o) {
   if (!b) { b = document.createElement('div'); b.id = 'neworder'; b.className = 'neworder'; b.setAttribute('role', 'alert'); b.setAttribute('aria-live', 'assertive'); document.body.appendChild(b); }
   b.innerHTML = `<button class="no-main" data-a="openOrder" data-id="${o.id}"><span class="no-ic">${icon('orders', 'sm')}</span><span class="grow"><b>New order #${o.order_no}${isCustApp(o) ? ' · Customer app' : ''}</b>
     <small>${esc(o.customer_name || '')} · pickup ${fmtDT(o.pickup_time)} · ${money(o.total)}</small></span><span class="no-view">View</span></button>
+    ${o.status === 'pending' ? `<button class="no-accept" data-a="acceptAlert" data-id="${o.id}">${icon('check', 'sm')}Accept</button>` : ''}
     <button class="no-x" data-a="dismissAlert" aria-label="Dismiss">${icon('xc', 'sm')}</button>`;
   b.classList.toggle('app', isCustApp(o)); requestAnimationFrame(() => b.classList.add('on'));
   clearTimeout(alertT); alertT = setTimeout(() => b.classList.remove('on'), 15000);
@@ -339,7 +360,7 @@ const liveHTML = () => `<span class="live ${S.live === 'ok' ? 'ok' : S.live === 
 function subscribe() {
   if (S.ch) sb.removeChannel(S.ch);
   let ch = sb.channel('vegpos-live');
-  for (const t of ['orders', 'products', 'stock_items', 'stock_movements', 'settings', 'staff']) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, onChange);
+  for (const t of ['orders', 'products', 'stock_items', 'stock_movements', 'settings', 'staff', 'customers', 'promotions']) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, onChange);
   S.ch = ch.subscribe(st => {
     setLive(st === 'SUBSCRIBED' ? 'ok' : ['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(st) ? 'bad' : 'connecting');
     // Realtime starts streaming a moment after SUBSCRIBED; re-read once so nothing written in that gap is missed.
@@ -365,7 +386,7 @@ function renderTabbar() {
   const overdue = S.orders.filter(o => isActive(o) && relMins(o.pickup_time) < 0).length;
   const low = lowCount();
   const badge = { orders: overdue, inventory: low };
-  $('tabbar').innerHTML = `<div class="side-brand"><img src="${BRAND.logo}" alt="" width="40" height="40"><div class="sb-t">${esc(bizName())}<em>${esc(BRAND.tagline)}</em></div><small>${esc(S.me?.name || S.me?.email || '')}</small></div>` +
+  $('tabbar').innerHTML = `<div class="side-brand"><img src="${BRAND.logo}" alt="" width="44" height="44"><div class="sb-t">${esc(bizName())}<em>${esc(BRAND.tagline)}</em></div><small>${esc(S.me?.name || S.me?.email || '')}</small></div>` +
     TABS.map(([k, l, ic]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-a="go" data-t="${k}" aria-label="${l}">${icon(ic)}<span>${l}</span>${badge[k] ? `<span class="badge">${badge[k]}</span>` : ''}</button>`).join('');
 }
 function go(t) {
@@ -428,7 +449,7 @@ function orderRow(o) {
   const [tm, ap] = fmtTime(o.pickup_time).split(' ');
   const nx = NEXT[o.status];
   const acts = o.status === 'cancelled' ? '' :
-    (nx ? `<button style="background:var(--accent)" data-a="advance" data-id="${o.id}">${icon('check', 'sm')}${ST_LABEL[nx]}</button>` : '') +
+    (nx ? `<button style="background:var(--accent)" data-a="advance" data-id="${o.id}">${icon('check', 'sm')}${o.status === 'pending' ? 'Accept' : ST_LABEL[nx]}</button>` : '') +
     (o.locked ? '' : `<button style="background:var(--red)" data-a="cancelOrder" data-id="${o.id}">${icon('xc', 'sm')}Cancel</button>`);
   const w = o.status === 'cancelled' ? 0 : (nx ? 84 : 0) + (o.locked ? 0 : 84);
   return `<div class="row-wrap" data-w="${w}">${w ? `<div class="swipe-actions">${acts}</div>` : ''}
@@ -438,7 +459,12 @@ function orderRow(o) {
         <div class="s">${esc(itemsText(o))}</div>
         <div class="o-meta">${chip(o.status)}${custBadge(o)}${dueTag(o)}</div></div>
       <div class="end"><div class="o-total">${money(o.total)}</div><div class="s small">${o.status !== 'cancelled' && !o.paid ? '<span style="color:var(--orange)">Unpaid</span>' : o.payment_method ? PAY[o.payment_method] : ''}</div></div>
-    </button></div>`;
+    </button></div>${quickActs(o)}`;
+}
+function quickActs(o) {
+  if (o.status === 'cancelled' || (o.paid && o.status !== 'pending')) return '';
+  return `<div class="qacts">${o.status === 'pending' ? `<button class="btn primary sm" data-a="accept" data-id="${o.id}">${icon('check', 'xs')}Accept</button>` : ''}
+    ${o.paid ? '' : `<button class="btn sm cashbtn" data-a="paidCash" data-id="${o.id}">${icon('cash', 'xs')}Paid cash · ${money(o.total)}</button><button class="btn sm plainish" data-a="cashSheet" data-id="${o.id}" aria-label="Cash received for order ${o.order_no}">Cash received…</button>`}</div>`;
 }
 function renderOrderList() {
   const list = filteredOrders();
@@ -489,11 +515,14 @@ function orderBody(o) {
     <div class="form-h">Items</div><div class="list">${(o.items || []).map(i => `<div class="line"><div class="grow"><div class="t">${esc(i.name)}</div><div class="s">${esc(i.variant || '')} · ${money(i.price)} each</div></div><div class="muted num">×${i.qty}</div><div class="p">${money(i.price * i.qty)}</div></div>`).join('')}</div>
     <div class="list totals mt">
       <div class="row static"><div class="grow t">Subtotal</div><div class="end num">${money(o.subtotal || o.total)}</div></div>
-      ${Number(o.discount) ? `<div class="row static"><div class="grow t">Discount</div><div class="end num">−${money(o.discount)}</div></div>` : ''}
+      ${discRows(o)}
       <div class="row static grand"><div class="grow t">Total</div><div class="end num">${money(o.total)}</div></div>
-      <div class="row static"><div class="grow"><div class="t">${o.paid ? 'Paid' : 'Not paid yet'}</div><div class="s">${o.payment_method ? PAY[o.payment_method] : 'No payment method'}</div></div>
+      <div class="row static"><div class="grow"><div class="t">${o.paid ? 'Paid' : 'Not paid yet'}</div><div class="s">${o.payment_method ? PAY[o.payment_method] : 'No payment method'}${o.paid && o.paid_at ? ` · ${fmtDT(o.paid_at)}${o.paid_by ? ' by ' + esc(String(o.paid_by).split('@')[0]) : ''}` : ''}</div></div>
         <label class="switch"><input type="checkbox" ${o.paid ? 'checked' : ''} data-a="togglePaid" data-id="${o.id}" aria-label="Paid"><span></span></label></div>
+      ${o.paid && o.cash_received != null ? `<div class="row static"><div class="grow"><div class="t">Cash received ${money(o.cash_received)}</div><div class="s">Change given ${money(o.change_given)}${Number(o.tip) ? ` · <b>Tip ${money(o.tip)}</b>` : ''}</div></div></div>` : ''}
     </div>
+    ${o.status !== 'cancelled' && !o.paid ? `<div class="paybar mt"><button class="btn primary lg" data-a="paidCash" data-id="${o.id}">${icon('cash', 'sm')}Paid cash · ${money(o.total)}</button><button class="btn lg" data-a="cashSheet" data-id="${o.id}">Cash received…</button></div>` : ''}
+    ${loyaltyBlock(o)}
     ${o.customer_phone || o.notes ? `<div class="list mt">${o.customer_phone ? `<a class="row" href="tel:${esc(o.customer_phone)}" style="color:inherit;text-decoration:none">${icon('phone', 'sm')}<div class="grow t">${esc(o.customer_phone)}</div><span class="chev">${icon('chev', 'sm')}</span></a>` : ''}
       ${o.notes ? `<div class="row static"><div class="grow"><div class="s">Notes</div><div style="white-space:pre-wrap">${esc(o.notes)}</div></div></div>` : ''}</div>` : ''}
     ${o.locked ? `<p class="form-note" style="text-align:center">${icon('lock', 'xs')} This order is locked. Status and payment can still be updated; items, customer, times and cancelling are protected.</p>` : ''}
@@ -505,7 +534,30 @@ function orderBody(o) {
     </div>
     <p class="small muted mt" style="text-align:center">${o.completed_at ? `Completed ${fmtDT(o.completed_at)}` : o.cancelled_at ? `Cancelled ${fmtDT(o.cancelled_at)} · stock returned` : `Updated ${fmtDT(o.updated_at || o.created_at)}`}</p>`;
 }
-function orderFoot(o) { const nx = NEXT[o.status]; return nx ? `<button class="btn primary lg block" data-a="advance" data-id="${o.id}">${NEXT_LABEL[o.status]}</button>` : ''; }
+function orderFoot(o) { const nx = NEXT[o.status]; return nx ? `<button class="btn primary lg block" data-a="advance" data-id="${o.id}">${o.status === 'pending' ? icon('check', 'sm') : ''}${NEXT_LABEL[o.status]}</button>` : ''; }
+function discRows(o) {
+  const man = r2(Number(o.discount || 0) - Number(o.promo_discount || 0) - Number(o.points_discount || 0));
+  return (man > 0 ? `<div class="row static"><div class="grow t">Discount</div><div class="end num">−${money(man)}</div></div>` : '') +
+    (Number(o.promo_discount) ? `<div class="row static"><div class="grow t">Promo <b>${esc(o.promo_code || '')}</b></div><div class="end num">−${money(o.promo_discount)}</div></div>` : '') +
+    (Number(o.points_discount) ? `<div class="row static"><div class="grow t">${num(o.points_redeemed)} points redeemed</div><div class="end num">−${money(o.points_discount)}</div></div>` : '');
+}
+function loyaltyBlock(o) {
+  if (o.status === 'cancelled') return '';
+  const c = custByPhone(o.customer_phone), l = L(), locked = o.locked;
+  const avail = c ? c.points + Number(o.points_redeemed || 0) : 0;
+  const maxBlocks = c && l.on ? Math.min(Math.floor(avail / l.blk), Math.floor((Number(o.total) + Number(o.points_discount || 0)) / l.val)) : 0;
+  const chips = [0, ...Array.from({ length: Math.min(maxBlocks, 5) }, (_, i) => (i + 1) * l.blk)];
+  return `<div class="form-h">Loyalty &amp; promo</div><div class="list">
+    <div class="row static">${icon('star', 'sm')}<div class="grow"><div class="t">${c ? `${num(c.points)} points` : o.customer_phone ? 'New loyalty customer' : 'No phone on this order'}</div>
+      <div class="s">${c ? `${esc(c.name || o.customer_name)} · ${num(c.paid_orders)} paid orders · ${money(c.total_spent)} spent` : o.customer_phone ? `Points are added when the order is paid (${l.earn} per $1)` : 'Add a phone (Edit) to earn and use points'}</div></div>
+      ${c ? `<button class="btn sm" data-a="openCustomer" data-id="${c.id}">History</button>` : ''}</div>
+    ${c && l.on && !locked && (maxBlocks > 0 || Number(o.points_redeemed)) ? `<div class="row static col"><div class="s" style="margin-bottom:6px">Redeem points · ${l.blk} points = ${money(l.val)} off</div><div class="chipsrow">${chips.map(n => `<button class="btn sm ${Number(o.points_redeemed || 0) === n ? 'primary' : ''}" data-a="redeem" data-id="${o.id}" data-n="${n}">${n ? `${num(n)} pts · −${money(n / l.blk * l.val)}` : 'None'}</button>`).join('')}</div></div>` : ''}
+    ${locked ? '' : `<div class="row static col"><div class="s" style="margin-bottom:6px">Promo code${o.promo_code ? ` · applied <b>${esc(o.promo_code)}</b>` : ''}</div><div class="chipsrow"><input class="codein" id="od-code" value="${esc(o.promo_code || '')}" placeholder="CODE" autocapitalize="characters" autocomplete="off" maxlength="24">
+      <button class="btn sm primary" data-a="applyPromo" data-id="${o.id}">Apply</button>${o.promo_code ? `<button class="btn sm" data-a="removePromo" data-id="${o.id}">Remove</button>` : ''}</div>
+      ${activePromos().length ? `<div class="chipsrow mt">${activePromos().slice(0, 4).map(p => `<button class="btn sm" data-a="pickPromo" data-code="${esc(p.code)}">${esc(p.code)} · ${esc(promoLabel(p))}</button>`).join('')}</div>` : ''}</div>`}
+  </div>`;
+}
+const activePromos = () => S.promos.filter(p => !p.archived && !promoProblem(p, 1e9));
 function openOrder(id) {
   const o = S.orders.find(x => x.id === id); if (!o) return;
   openSheet({ title: `Order #${o.order_no}`, body: orderBody(o), foot: orderFoot(o), key: id,
@@ -523,9 +575,10 @@ function receiptHTML(o) {
     <div class="r"><span>Customer</span><span>${esc(o.customer_name)}</span></div>${o.customer_phone ? `<div class="r"><span>Phone</span><span>${esc(o.customer_phone)}</span></div>` : ''}
     <div class="r"><span>Pickup</span><span>${fmtDT(o.pickup_time)}</span></div><hr>
     ${(o.items || []).map(i => `<div class="r"><span>${i.qty}× ${esc(i.name)} ${esc(i.variant || '')}</span><span>${money(i.price * i.qty)}</span></div>`).join('')}<hr>
-    <div class="r"><span>Subtotal</span><span>${money(o.subtotal || o.total)}</span></div>${Number(o.discount) ? `<div class="r"><span>Discount</span><span>−${money(o.discount)}</span></div>` : ''}
+    <div class="r"><span>Subtotal</span><span>${money(o.subtotal || o.total)}</span></div>${Number(o.discount) ? `<div class="r"><span>Discount${o.promo_code ? ' (' + esc(o.promo_code) + ')' : ''}${Number(o.points_redeemed) ? ' · ' + num(o.points_redeemed) + ' pts' : ''}</span><span>−${money(o.discount)}</span></div>` : ''}
     <div class="r b"><span>Total</span><span>${money(o.total)}</span></div>
     <div class="r"><span>${o.paid ? 'Paid' : 'To pay'}</span><span>${o.payment_method ? PAY[o.payment_method] : ''}</span></div>
+    ${o.paid && o.cash_received != null ? `<div class="r"><span>Cash received</span><span>${money(o.cash_received)}</span></div><div class="r"><span>${Number(o.tip) ? 'Tip (kept)' : 'Change'}</span><span>${money(Number(o.tip) ? o.tip : o.change_given)}</span></div>` : ''}
     ${o.notes ? `<hr><div>${esc(o.notes)}</div>` : ''}<hr><div class="c">Thank you!</div></div>`;
 }
 function receiptText(o) {
@@ -542,7 +595,9 @@ function openReceipt(id) {
 /* ---------- New / edit order ---------- */
 const cartSub = () => r2(S.cart.items.reduce((a, i) => a + i.price * i.qty, 0));
 const cartDisc = () => Math.min(Math.max(Number(S.cart.discount) || 0, 0), cartSub());
-const cartTotal = () => r2(cartSub() - cartDisc());
+const cartPromo = () => { const p = S.cart.promo ? promoByCode(S.cart.promo) : null; const left = cartSub() - cartDisc(); return p && !promoProblem(p, left) ? promoAmt(p, left) : 0; };
+const cartPtsDisc = () => { const l = L(); return S.cart.points ? (S.cart.points / l.blk) * l.val : 0; };
+const cartTotal = () => r2(Math.max(cartSub() - cartDisc() - cartPromo() - cartPtsDisc(), 0));
 const cartCount = () => S.cart.items.reduce((a, i) => a + i.qty, 0);
 function cartPieces(pid) { return S.cart.items.filter(i => i.productId === pid).reduce((a, i) => a + i.pieces * i.qty, 0); }
 function origPieces(pid) { const o = S.cart.id && S.orders.find(x => x.id === S.cart.id); return o && o.status !== 'cancelled' ? (o.items || []).filter(i => i.productId === pid).reduce((a, i) => a + (i.pieces || 0) * (i.qty || 0), 0) : 0; }
@@ -571,35 +626,62 @@ function renderMenu() {
   if (!panel.contains(document.activeElement) || !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) panel.innerHTML = `<h3>${editing ? `Order #${c.no}` : 'Current order'}</h3>` + cartHTML() + `<div style="padding:0 16px 16px">${placeBtn()}</div>`;
   else updateCartTotals();
 }
-function placeBtn() { const c = S.cart; return `<button class="btn primary lg block" data-a="placeOrder" ${c.items.length ? '' : 'disabled'}>${c.id ? 'Save changes' : 'Place order'} · <span class="num" data-ct="total">${money(cartTotal())}</span></button>`; }
+function placeBtn() {
+  const c = S.cart, o = c.id && S.orders.find(x => x.id === c.id), dis = c.items.length ? '' : 'disabled', paidAlready = o && o.paid;
+  return `<div class="placebar">${paidAlready ? '' : `<button class="btn primary lg block" data-a="placePaidCash" ${dis}>${icon('cash', 'sm')}${c.id ? 'Save · paid cash' : 'Paid cash'} · <span class="num" data-ct="total">${money(cartTotal())}</span></button>`}
+    <div class="placebar2">${paidAlready ? '' : `<button class="btn lg" data-a="cashSheet" data-id="cart" ${dis}>Cash received…</button>`}<button class="btn lg ${paidAlready ? 'primary block' : ''}" data-a="placeOrder" ${dis}>${c.id ? 'Save changes' : 'Save · pay later'}</button></div></div>`;
+}
 function cartHTML() {
   const c = S.cart;
   const lines = c.items.length ? c.items.map((i, ix) => `<div class="line"><div class="grow"><div class="t">${esc(i.name)}</div><div class="s">${esc(i.variant)} · ${money(i.price)}</div></div>
     <div class="stepper"><button data-a="qty" data-i="${ix}" data-d="-1" aria-label="Less">${icon('minus', 'xs')}</button><span>${i.qty}</span><button data-a="qty" data-i="${ix}" data-d="1" aria-label="More">${icon('plus', 'xs')}</button></div>
     <div class="p">${money(i.price * i.qty)}</div></div>`).join('') : `<div class="empty" style="padding:24px">${icon('bag')}<b>No items yet</b>Tap a size on the menu.</div>`;
   const pay = ['cash', 'card', 'online'].map(k => `<button class="${c.payment === k ? 'on' : ''}" data-a="pay" data-k="${k}">${PAY[k]}</button>`).join('');
+  const cu = custByPhone(c.phone), l = L(), left = cartSub() - cartDisc() - cartPromo();
+  const orig = c.id ? Number((S.orders.find(x => x.id === c.id) || {}).points_redeemed || 0) : 0, have = cu ? cu.points + orig : 0;
+  const blocks = cu && l.on ? Math.min(Math.floor(have / l.blk), Math.floor((left) / l.val) + (c.points / l.blk)) : 0;
+  const pr = c.promo ? promoByCode(c.promo) : null, prMsg = c.promo ? promoProblem(pr, cartSub() - cartDisc()) : null;
   return `<div class="list" style="box-shadow:none">${lines}</div>
   <div style="padding:0 0 4px"><div class="form-h">Customer</div><div class="form">
-    <div class="field"><label>Name</label><input data-c="customer" value="${esc(c.customer)}" placeholder="Required" autocomplete="off" maxlength="80" enterkeyhint="next"></div>
-    <div class="field"><label>Phone</label><input data-c="phone" type="tel" inputmode="tel" value="${esc(c.phone)}" placeholder="Optional" autocomplete="off" maxlength="30"></div></div>
+    <div class="field"><label>Name</label><input data-c="customer" value="${esc(c.customer)}" placeholder="Walk-in" autocomplete="off" maxlength="80" enterkeyhint="next"></div>
+    <div class="field"><label>Phone</label><input data-c="phone" type="tel" inputmode="tel" value="${esc(c.phone)}" placeholder="Optional · for points" autocomplete="off" maxlength="30"></div></div>
+  <div id="cart-loyalty">${cartLoyaltyHTML()}</div>
   <div class="form-h">Pickup</div><div class="form">
     <div class="field"><label>Date</label><input data-c="date" type="date" value="${esc(c.date)}"></div>
     <div class="field"><label>Time</label><input data-c="time" type="time" step="300" value="${esc(c.time)}"></div></div>
   <div class="quick mt">${[15, 30, 60].map(m => `<button class="btn sm" data-a="quickTime" data-m="${m}">In ${m < 60 ? m + ' min' : '1 hr'}</button>`).join('')}</div>
-  <div class="form-h">Payment</div><div class="seg">${pay}</div>
-  <div class="form mt"><div class="field"><label>Paid now</label><span class="grow" style="flex:1"></span><label class="switch"><input type="checkbox" data-c="paid" ${c.paid ? 'checked' : ''}><span></span></label></div>
+  <div class="form-h">Promo &amp; discount</div><div class="form">
+    <div class="field"><label>Promo code</label><input data-c="promo" value="${esc(c.promo)}" placeholder="Optional" autocapitalize="characters" autocomplete="off" maxlength="24"></div>
     <div class="field"><label>Discount</label><input data-c="discount" inputmode="decimal" type="text" value="${esc(c.discount)}" placeholder="$0.00"></div></div>
+  <p class="form-note" data-ct="promomsg">${c.promo ? (prMsg ? `<span style="color:var(--red)">${esc(prMsg)}</span>` : `${esc(pr.name)} · ${esc(promoLabel(pr))}`) : activePromos().length ? `Active: ${activePromos().slice(0, 3).map(p => esc(p.code)).join(', ')}` : ''}</p>
+  <details class="more-pay"><summary>Card / online or mark paid later</summary><div class="seg mt">${pay}</div>
+  <div class="form mt"><div class="field"><label>Paid now</label><span class="grow" style="flex:1"></span><label class="switch"><input type="checkbox" data-c="paid" ${c.paid ? 'checked' : ''}><span></span></label></div></div>
+  <p class="form-note">For cash, just tap <b>Paid cash</b> below. This switch is for card/online payments.</p></details>
   <div class="form-h">Notes</div><div class="form"><div class="field col"><textarea data-c="notes" placeholder="Allergies, sauces, special requests…" maxlength="500">${esc(c.notes)}</textarea></div></div>
   <div class="list totals mt" style="box-shadow:none;background:transparent">
     <div class="row static" style="background:transparent"><div class="grow t muted">Subtotal</div><div class="end num" data-ct="sub">${money(cartSub())}</div></div>
-    <div class="row static" style="background:transparent"><div class="grow t muted">Discount</div><div class="end num" data-ct="disc">−${money(cartDisc())}</div></div>
+    <div class="row static" style="background:transparent"><div class="grow t muted">Discounts</div><div class="end num" data-ct="disc">−${money(cartDisc() + cartPromo() + cartPtsDisc())}</div></div>
     <div class="row static grand" style="background:transparent"><div class="grow t">Total</div><div class="end num" data-ct="total">${money(cartTotal())}</div></div></div></div>`;
 }
 function updateCartTotals() {
   document.querySelectorAll('[data-ct=sub]').forEach(e => e.textContent = money(cartSub()));
-  document.querySelectorAll('[data-ct=disc]').forEach(e => e.textContent = '−' + money(cartDisc()));
+  document.querySelectorAll('[data-ct=disc]').forEach(e => e.textContent = '−' + money(cartDisc() + cartPromo() + cartPtsDisc()));
+  document.querySelectorAll('#cart-loyalty').forEach(e => e.innerHTML = cartLoyaltyHTML());
+  const c = S.cart, pr = c.promo ? promoByCode(c.promo) : null, m = c.promo ? promoProblem(pr, cartSub() - cartDisc()) : null;
+  document.querySelectorAll('[data-ct=promomsg]').forEach(e => e.innerHTML = c.promo ? (m ? `<span style="color:var(--red)">${esc(m)}</span>` : `${esc(pr.name)} · ${esc(promoLabel(pr))} · −${money(cartPromo())}`) : '');
   document.querySelectorAll('[data-ct=total]').forEach(e => e.textContent = money(cartTotal()));
   updateCartbar();
+}
+function cartLoyaltyHTML() {
+  const c = S.cart, cu = custByPhone(c.phone), l = L();
+  if (!normPhone(c.phone) || !l.on) return '';
+  if (!cu) return `<p class="form-note">${icon('star', 'xs')} New loyalty customer · earns ${num(Math.floor(cartTotal() * l.earn))} points when paid</p>`;
+  const orig = c.id ? Number((S.orders.find(x => x.id === c.id) || {}).points_redeemed || 0) : 0, have = cu.points + orig;
+  const room = cartSub() - cartDisc() - cartPromo();
+  const max = Math.min(Math.floor(have / l.blk), Math.floor(room / l.val));
+  if (c.points > max * l.blk) c.points = max * l.blk;
+  return `<div class="loy">${icon('star', 'sm')}<div class="grow"><b>${esc(cu.name || 'Customer')} · ${num(cu.points)} points</b><small>${num(cu.paid_orders)} paid orders · ${l.blk} pts = ${money(l.val)} off</small>
+    ${max > 0 ? `<div class="chipsrow mt">${[0, ...Array.from({ length: Math.min(max, 5) }, (_, i) => (i + 1) * l.blk)].map(n => `<button class="btn sm ${c.points === n ? 'primary' : ''}" data-a="cartPts" data-n="${n}">${n ? `Use ${num(n)} · −${money(n / l.blk * l.val)}` : 'No points'}</button>`).join('')}</div>` : ''}</div></div>`;
 }
 function updateCartbar() {
   const n = cartCount(), on = S.tab === 'new' && n > 0 && !S.sheet;
@@ -625,16 +707,19 @@ function addVar(pid, vi) {
   buzz(); if (availPieces(p) < 0) toast(`Heads up: ${p.name} stock will go below zero`, true);
   cartChanged();
 }
-async function placeOrder(btn) {
+async function placeOrder(btn, cash) {
   const c = S.cart;
   if (!c.items.length) return toast('Add at least one item', true);
-  if (!c.customer.trim()) { toast('Add the customer’s name', true); const el = document.querySelector('[data-c=customer]'); el && el.focus(); return; }
   if (!c.date || !c.time) return toast('Choose a pickup date and time', true);
   if (c.discount && !(Number(c.discount) >= 0)) return toast('Discount must be a number', true);
-  const r = await busy(btn, () => rpc('save_order', { p_order_id: c.id, p_customer_name: c.customer.trim(), p_customer_phone: c.phone.trim() || null,
-    p_pickup_time: nzToISO(c.date, c.time), p_items: c.items, p_notes: c.notes.trim() || null, p_payment_method: c.payment, p_paid: !!c.paid, p_discount: cartDisc() }));
+  if (c.promo) { const m = promoProblem(promoByCode(c.promo), cartSub() - cartDisc()); const o = c.id && S.orders.find(x => x.id === c.id); if (m && !(o && o.promo_code === c.promo.trim().toUpperCase())) return toast(m, true); }
+  const r = await busy(btn, () => rpc('save_order_full', { p_order_id: c.id, p_customer_name: c.customer.trim() || 'Walk-in', p_customer_phone: c.phone.trim() || null,
+    p_pickup_time: nzToISO(c.date, c.time), p_items: c.items, p_notes: c.notes.trim() || null, p_payment_method: cash ? 'cash' : c.payment, p_paid: !!c.paid, p_discount: cartDisc(),
+    p_promo_code: (c.promo || '').trim().toUpperCase(), p_redeem_points: c.points || 0, p_paid_cash: !!cash, p_cash_received: cash ? cash.received : null, p_keep_tip: !!(cash && cash.tip) }));
   applyRow('orders', r); buzz();
-  toast(c.id ? `Order #${r.order_no} updated` : `Order #${r.order_no} placed · ${money(r.total)}`);
+  const extra = r.cash_received != null && cash ? (Number(r.tip) ? ` · tip ${money(r.tip)}` : Number(r.change_given) ? ` · change ${money(r.change_given)}` : '') : '';
+  toast(cash ? `#${r.order_no} paid cash · ${money(r.total)}${extra}` : c.id ? `Order #${r.order_no} updated` : `Order #${r.order_no} saved · ${money(r.total)} to pay`);
+  if (S.sheet) closeSheet();
   S.cart = newCart(); if (S.sheet) closeSheet();
   S.of.seg = 'active'; go('orders');
   sb.from('products').select('*').then(({ data }) => { if (data) { S.products = data.sort((a, b) => (a.sort_order - b.sort_order) || (a.product_no - b.product_no)); rerender(); } });
@@ -644,9 +729,125 @@ function editOrder(id) {
   const o = S.orders.find(x => x.id === id); if (!o) return; if (o.locked) { toast('This order is locked', true); return; }
   S.cart = { id: o.id, no: o.order_no, items: (o.items || []).map(i => ({ ...i, qty: Number(i.qty) || 1, price: Number(i.price) || 0, pieces: Number(i.pieces) || 1 })),
     customer: o.customer_name || '', phone: o.customer_phone || '', date: dayKey(o.pickup_time), time: hm(o.pickup_time), notes: o.notes || '',
-    payment: o.payment_method || 'cash', paid: !!o.paid, discount: Number(o.discount) ? String(o.discount) : '' };
+    payment: o.payment_method || 'cash', paid: !!o.paid, promo: o.promo_code || '', points: Number(o.points_redeemed) || 0,
+    discount: r2(Number(o.discount || 0) - Number(o.promo_discount || 0) - Number(o.points_discount || 0)) > 0 ? String(r2(Number(o.discount || 0) - Number(o.promo_discount || 0) - Number(o.points_discount || 0))) : '' };
   closeSheet(); go('new');
   if (matchMedia('(max-width:1099px)').matches) openCheckout();
+}
+
+/* ---------- Cash payment ---------- */
+async function accept(id, btn) { const o = S.orders.find(x => x.id === id); if (!o || o.status !== 'pending') return; await setStatus(id, 'preparing', btn); }
+async function paidCash(id, btn, received, tip) {
+  const o = S.orders.find(x => x.id === id); if (!o) return;
+  const r = await busy(btn, () => rpc('mark_order_paid_cash', { p_order_id: id, p_cash_received: received ?? null, p_keep_tip: !!tip }));
+  applyRow('orders', r); buzz();
+  toast(`#${r.order_no} paid cash · ${money(r.total)}${Number(r.tip) ? ` · tip ${money(r.tip)}` : Number(r.change_given) ? ` · change ${money(r.change_given)}` : ''}`);
+  rerender(); return r;
+}
+function cashTotal() { const c = S.cash; if (!c) return 0; if (c.id === 'cart') return cartTotal(); const o = S.orders.find(x => x.id === c.id); return o ? Number(o.total) : 0; }
+function cashRecv() { const c = S.cash, t = cashTotal(); if (c.custom !== '' && c.custom != null) return r2(Number(c.custom)); return c.received == null ? t : c.received; }
+function cashBody() {
+  const c = S.cash, t = cashTotal(), rec = cashRecv(), ok = rec >= t - 0.001, extra = ok ? r2(rec - t) : 0;
+  const o = c.id !== 'cart' && S.orders.find(x => x.id === c.id);
+  const notes = [20, 50, 100];
+  return `<div class="cash-hero"><div class="k">${o ? `Order #${o.order_no} · ${esc(o.customer_name)}` : 'New order'}</div><div class="v num">${money(t)}</div><div class="k">to pay in cash</div></div>
+    <div class="form-h">Cash received</div>
+    <div class="cashgrid"><button class="btn lg ${c.received == null && c.custom === '' ? 'primary' : ''}" data-a="cashPick" data-n="exact">Exact</button>${notes.map(n => `<button class="btn lg ${c.received === n && c.custom === '' ? 'primary' : ''}" data-a="cashPick" data-n="${n}" ${n < t - 0.001 ? 'disabled aria-label="$' + n + ' (less than the total)"' : ''}>$${n}</button>`).join('')}</div>
+    <div class="form mt"><div class="field"><label>Other amount</label><input id="cash-custom" inputmode="decimal" placeholder="$0.00" value="${esc(c.custom)}" autocomplete="off"></div></div>
+    <div class="change ${ok ? '' : 'bad'}" id="cash-change">${cashChangeHTML()}</div>
+    <label class="tiprow ${extra > 0 ? '' : 'dim'}"><input type="checkbox" id="cash-tip" ${c.tip ? 'checked' : ''} ${extra > 0 ? '' : 'disabled'}><span class="grow"><b>Keep as tip</b><small>Customer says keep the change — record ${money(extra)} as a tip</small></span><span class="switch"><span></span></span></label>`;
+}
+function cashChangeHTML() {
+  const c = S.cash, t = cashTotal(), rec = cashRecv(), ok = rec >= t - 0.001, extra = ok ? r2(rec - t) : 0;
+  if (!ok) return `<div class="k">Cash received ${money(rec)} is less than ${money(t)}</div>`;
+  return c.tip && extra > 0 ? `<div class="k">Tip kept</div><div class="v num">${money(extra)}</div><div class="k">No change to give</div>` : `<div class="k">Change due</div><div class="v num">${money(extra)}</div><div class="k">Received ${money(rec)}</div>`;
+}
+function cashFoot() { const t = cashTotal(), rec = cashRecv(); return `<button class="btn primary lg block" data-a="cashConfirm" ${rec >= t - 0.001 ? '' : 'disabled'}>${icon('cash', 'sm')}Confirm paid cash · ${money(t)}</button>`; }
+function openCash(id) {
+  if (id === 'cart' && !S.cart.items.length) return toast('Add at least one item', true);
+  S.cash = { id, received: null, custom: '', tip: false };
+  openSheet({ title: 'Cash received', key: 'cash', body: cashBody(), foot: cashFoot(), left: id === 'cart' ? `<button class="btn plain" data-a="backToCart">${icon('back', 'sm')}Order</button>` : `<button class="btn plain" data-a="openOrder" data-id="${id}">${icon('back', 'sm')}Order</button>`,
+    refresh() { $('sheet-body').innerHTML = cashBody(); $('sheet-foot').innerHTML = cashFoot(); } });
+}
+function cashUpdate() { const ch = $('cash-change'); if (!ch) return; const t = cashTotal(), rec = cashRecv(), ok = rec >= t - 0.001; ch.className = 'change ' + (ok ? '' : 'bad'); ch.innerHTML = cashChangeHTML();
+  const tp = $('cash-tip'), extra = ok ? r2(rec - t) : 0; if (tp) { tp.disabled = !(extra > 0); if (!(extra > 0)) { tp.checked = false; S.cash.tip = false; } tp.closest('.tiprow').classList.toggle('dim', !(extra > 0)); tp.closest('.tiprow').querySelector('small').textContent = `Customer says keep the change — record ${money(extra)} as a tip`; }
+  $('sheet-foot').innerHTML = cashFoot(); }
+async function cashConfirm(btn) {
+  const c = S.cash, rec = cashRecv(), t = cashTotal(); if (!(rec >= t - 0.001)) return toast('Cash received is less than the total', true);
+  if (c.id === 'cart') { await placeOrder(btn, { received: rec, tip: c.tip }); S.cash = null; return; }
+  const id = c.id; await paidCash(id, btn, rec, c.tip); S.cash = null; openOrder(id);
+}
+
+/* ---------- Promotions (staff) ---------- */
+const pstatus = p => p.archived ? ['Archived', 'tag-muted'] : !p.active ? ['Off', 'tag-muted'] : promoProblem(p, 1e9) ? [promoProblem(p, 1e9).replace(/^Sorry, that promo code (has |isn't )?/, '').replace(/^That promo code /, ''), 'st-pending'] : ['Live', 'st-completed'];
+function promosBody() {
+  const list = S.promos.filter(p => S.pf === 'archived' ? p.archived : !p.archived);
+  return `<p class="form-note">Customers type the code at checkout, or staff apply it to an order. Codes are never deleted — archive them instead.</p>
+    <div class="seg mt">${[['live', 'Current'], ['archived', 'Archived']].map(([k, l]) => `<button class="${(S.pf || 'live') === k ? 'on' : ''}" data-a="pf" data-k="${k}">${l}</button>`).join('')}</div>
+    <div class="list mt">${list.length ? list.map(p => { const [st, cls] = pstatus(p); return `<div class="row static promo-row"><div class="grow"><div class="t"><b class="code">${esc(p.code)}</b> ${esc(p.name)}</div>
+      <div class="s">${esc(promoLabel(p))}${Number(p.min_order) ? ` · min ${money(p.min_order)}` : ''} · used ${num(p.used_count)}${p.usage_limit != null ? ` / ${num(p.usage_limit)}` : ''}${p.ends_at ? ` · ends ${fmtDay(dayKey(p.ends_at))}` : ''}${p.show_on_menu ? ' · on menu' : ''}</div>
+      <div class="o-meta"><span class="chip ${cls}">${esc(st)}</span></div></div>
+      ${p.archived ? `<button class="btn sm" data-a="unarchivePromo" data-id="${p.id}">Restore</button>` : `<label class="switch" aria-label="Active"><input type="checkbox" data-a="togglePromo" data-id="${p.id}" ${p.active ? 'checked' : ''}><span></span></label><button class="btn sm" data-a="editPromo" data-id="${p.id}">Edit</button>`}</div>`; }).join('')
+      : `<div class="empty" style="padding:28px">${icon('tag')}<b>${S.pf === 'archived' ? 'No archived promotions' : 'No promotions yet'}</b>${S.pf === 'archived' ? '' : 'Create one to offer a discount code.'}</div>`}</div>`;
+}
+function openPromos() { S.pf = S.pf || 'live'; openSheet({ title: 'Promotions', key: 'promos', body: promosBody(), right: `<button class="btn plain" data-a="editPromo">${icon('plus', 'xs')} New</button>`, refresh() { $('sheet-body').innerHTML = promosBody(); } }); }
+const toLocalDT = iso => iso ? `${dayKey(iso)}T${hm(iso)}` : '';
+function promoEditorBody() {
+  const e = S.pe;
+  return `<div class="form">
+    <div class="field"><label>Code</label><input data-pe2="code" value="${esc(e.code)}" placeholder="e.g. WELCOME10" autocapitalize="characters" autocomplete="off" maxlength="24"></div>
+    <div class="field"><label>Name</label><input data-pe2="name" value="${esc(e.name)}" placeholder="e.g. Welcome offer" maxlength="60"></div>
+    <div class="field col"><label>Description</label><input data-pe2="description" value="${esc(e.description)}" placeholder="Optional, shown on the menu banner" maxlength="140"></div></div>
+  <div class="form-h">Discount</div><div class="seg">${[['percent', 'Percent %'], ['fixed', 'Fixed $']].map(([k, l]) => `<button class="${e.kind === k ? 'on' : ''}" data-a="peKind" data-k="${k}">${l}</button>`).join('')}</div>
+  <div class="form mt"><div class="field"><label>Value</label><input data-pe2="value" inputmode="decimal" value="${esc(e.value)}" placeholder="${e.kind === 'percent' ? '10' : '5.00'}"><span class="unit">${e.kind === 'percent' ? '%' : '$'}</span></div>
+    <div class="field"><label>Min order</label><input data-pe2="min_order" inputmode="decimal" value="${esc(e.min_order)}" placeholder="0.00"><span class="unit">$</span></div>
+    <div class="field"><label>Usage limit</label><input data-pe2="usage_limit" inputmode="numeric" value="${esc(e.usage_limit)}" placeholder="Unlimited"></div></div>
+  <div class="form-h">Dates (NZ time, optional)</div><div class="form">
+    <div class="field"><label>Starts</label><input data-pe2="starts_at" type="datetime-local" value="${esc(e.starts_at)}"></div>
+    <div class="field"><label>Ends</label><input data-pe2="ends_at" type="datetime-local" value="${esc(e.ends_at)}"></div></div>
+  <div class="form mt"><div class="field"><label>Active</label><span class="grow" style="flex:1"></span><label class="switch"><input type="checkbox" data-pe2="active" ${e.active ? 'checked' : ''}><span></span></label></div>
+    <div class="field"><label>Show on menu</label><span class="grow" style="flex:1"></span><label class="switch"><input type="checkbox" data-pe2="show_on_menu" ${e.show_on_menu ? 'checked' : ''}><span></span></label></div></div>
+  ${e.id ? `<p class="form-note">Used ${num(e.used_count)} time${e.used_count === 1 ? '' : 's'}.</p><div style="padding:10px 0 0"><button class="btn block danger" data-a="archivePromo" data-id="${e.id}">Archive promotion</button></div>` : ''}`;
+}
+function openPromoEditor(id) {
+  const p = id ? S.promos.find(x => x.id === id) : null;
+  S.pe = p ? { id: p.id, code: p.code, name: p.name, description: p.description || '', kind: p.kind, value: String(Number(p.value)), min_order: Number(p.min_order) ? String(Number(p.min_order)) : '', usage_limit: p.usage_limit ?? '', starts_at: toLocalDT(p.starts_at), ends_at: toLocalDT(p.ends_at), active: p.active, show_on_menu: p.show_on_menu, used_count: p.used_count }
+    : { id: null, code: '', name: '', description: '', kind: 'percent', value: '', min_order: '', usage_limit: '', starts_at: '', ends_at: '', active: true, show_on_menu: false };
+  openSheet({ title: p ? `Edit ${p.code}` : 'New promotion', key: 'promoEd', body: promoEditorBody(), left: `<button class="btn plain" data-a="openPromos">${icon('back', 'sm')}Promotions</button>`, foot: `<button class="btn primary lg block" data-a="savePromo">Save promotion</button>` });
+}
+async function savePromo(btn) {
+  const e = S.pe, code = String(e.code || '').trim().toUpperCase(), val = Number(e.value), min = e.min_order === '' ? 0 : Number(e.min_order), lim = e.usage_limit === '' ? null : parseInt(e.usage_limit, 10);
+  if (!/^[A-Z0-9_-]{2,24}$/.test(code)) return toast('Code: 2–24 letters, numbers, - or _', true);
+  if (!String(e.name || '').trim()) return toast('Give the promotion a name', true);
+  if (!(val > 0) || (e.kind === 'percent' && val > 100)) return toast(e.kind === 'percent' ? 'Percent must be between 1 and 100' : 'Value must be more than $0', true);
+  if (!(min >= 0)) return toast('Min order must be 0 or more', true);
+  if (lim !== null && !(lim >= 1)) return toast('Usage limit must be 1 or more (or blank)', true);
+  const toISO = v => v ? nzToISO(v.slice(0, 10), v.slice(11, 16)) : null;
+  const row = { code, name: e.name.trim(), description: String(e.description || '').trim() || null, kind: e.kind, value: val, min_order: min, usage_limit: lim, starts_at: toISO(e.starts_at), ends_at: toISO(e.ends_at), active: !!e.active, show_on_menu: !!e.show_on_menu, updated_at: new Date().toISOString() };
+  if (row.starts_at && row.ends_at && row.ends_at <= row.starts_at) return toast('End must be after start', true);
+  const r = await busy(btn, () => e.id ? q(sb.from('promotions').update(row).eq('id', e.id).select().single()) : q(sb.from('promotions').insert({ ...row, created_by: S.session.user.email }).select().single()));
+  applyRow('promotions', r); toast(`${r.code} saved`); openPromos();
+}
+
+/* ---------- Loyalty customers (staff) ---------- */
+function loyaltyBody() {
+  const qq = (S.lq || '').trim().toLowerCase(), l = L();
+  const list = S.customers.filter(c => !qq || `${c.name || ''} ${c.display_phone || ''} ${c.phone}`.toLowerCase().includes(qq)).sort((a, b) => b.points - a.points || new Date(b.last_order_at || 0) - new Date(a.last_order_at || 0));
+  return `<p class="form-note">${l.on ? `${l.earn} point per $1 paid · ${l.blk} points = ${money(l.val)} off. Points are added when an order is marked paid and reversed if it is cancelled.` : 'Loyalty is switched off in Settings.'}</p>
+    <div class="toolbar mt"><label class="search">${icon('search', 'sm')}<input id="lq" type="search" placeholder="Search name or phone" value="${esc(S.lq || '')}" autocomplete="off"></label></div>
+    <div class="list mt">${list.length ? list.slice(0, 200).map(c => `<button class="row" data-a="openCustomer" data-id="${c.id}">${icon('user', 'sm')}<div class="grow"><div class="t">${esc(c.name || 'Customer')} <span class="muted small">${esc(c.display_phone || c.phone)}</span></div><div class="s">${num(c.paid_orders)} paid orders · ${money(c.total_spent)} spent</div></div><div class="end"><b class="num">${num(c.points)}</b><div class="s small">points</div></div></button>`).join('')
+      : `<div class="empty" style="padding:28px">${icon('star')}<b>No loyalty customers yet</b>Customers are added automatically from the phone number on an order.</div>`}</div>`;
+}
+function openLoyalty() { openSheet({ title: 'Loyalty', key: 'loyalty', body: loyaltyBody(), refresh() { $('sheet-body').innerHTML = loyaltyBody(); }, after() { const i = $('lq'); i && i.addEventListener('input', () => { S.lq = i.value; const st = i.selectionStart; $('sheet-body').innerHTML = loyaltyBody(); const j = $('lq'); j.focus(); try { j.setSelectionRange(st, st); } catch (e) { } }); } }); }
+const LK = { earn: 'Earned', earn_reversal: 'Earn reversed', earn_adjust: 'Earn adjusted', redeem: 'Redeemed', redeem_reversal: 'Redeem reversed', manual: 'Manual' };
+async function openCustomer(id) {
+  const c = S.customers.find(x => x.id === id); if (!c) return;
+  openSheet({ title: c.name || 'Customer', key: 'cust', left: `<button class="btn plain" data-a="openLoyalty">${icon('back', 'sm')}Loyalty</button>`, body: `<div class="cash-hero"><div class="k">${esc(c.display_phone || c.phone)}</div><div class="v num">${num(c.points)}</div><div class="k">points · ${num(c.lifetime_points)} earned · ${num(c.redeemed_points)} redeemed</div></div><div class="list mt" id="cust-led"><div class="empty" style="padding:20px">Loading history…</div></div>` });
+  try {
+    const rows = await q(sb.from('loyalty_ledger').select('*').eq('customer_id', id).order('id', { ascending: false }).limit(200));
+    const el = $('cust-led'); if (!el) return;
+    el.innerHTML = rows.length ? rows.map(r => `<div class="row static"><div class="grow"><div class="t">${LK[r.kind] || r.kind}${r.order_no ? ` · #${r.order_no}` : ''}</div><div class="s">${fmtDT(r.created_at)}${r.note ? ' · ' + esc(r.note) : ''}</div></div><div class="end"><b class="num" style="color:${r.points >= 0 ? 'var(--accent)' : 'var(--red)'}">${r.points >= 0 ? '+' : ''}${num(r.points)}</b><div class="s small">bal ${num(r.balance_after)}</div></div></div>`).join('') : '<div class="empty" style="padding:20px">No points history yet</div>';
+  } catch (e) { const el = $('cust-led'); if (el) el.innerHTML = `<div class="empty" style="padding:20px">${esc(errMsg(e))}</div>`; }
 }
 
 /* ---------- Inventory ---------- */
@@ -918,6 +1119,7 @@ function renderInsights() {
     <div class="chartcard mt"><h4 id="s-trend-h"></h4><div class="big" id="s-trend-v"></div><div class="chartbox"><canvas id="c-trend" aria-label="Revenue trend"></canvas></div></div>
     <div class="grid2"><div class="chartcard"><h4>Orders by pickup hour</h4><div class="big" id="s-hour-v"></div><div class="chartbox" style="height:170px"><canvas id="c-hour"></canvas></div></div>
       <div class="chartcard" id="s-week-card"><h4>Sales by day of week</h4><div class="big" id="s-week-v"></div><div class="chartbox" style="height:170px"><canvas id="c-week"></canvas></div></div></div>
+    <div class="section-h mt"><b>Cash</b><button class="btn sm" data-a="exportPayments">${icon('download', 'xs')} Payments CSV</button></div><div class="stats" id="s-cash"></div>
     <div class="grid2"><div><div class="section-h"><b>Top sellers</b><span id="s-top-n"></span></div><div class="list" id="s-top"></div></div>
       <div><div class="section-h"><b>Payments</b></div><div class="card" style="padding:14px 16px" id="s-pay"></div>
       <div class="section-h mt"><b>More</b></div><div class="list" id="s-more"></div></div></div>`;
@@ -945,6 +1147,12 @@ function renderInsights() {
   $('s-week-card').hidden = one;
   if (!one) { const wd = Array(7).fill(0); valid.forEach(o => wd[(weekday(dayKey(o.pickup_time)) + 6) % 7] += Number(o.total)); const best = wd.indexOf(Math.max(...wd));
     $('s-week-v').textContent = n ? `Best: ${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][best]}` : '—'; chartUpsert('c-week', 'bar', WD, wd.map(r2)); }
+  // cash (by the day the payment was taken)
+  const pays = paidInRange(a, b), cashP = pays.filter(o => o.payment_method === 'cash');
+  const cashIn = cashP.reduce((s, o) => s + cashKept(o), 0), tips = pays.reduce((s, o) => s + Number(o.tip || 0), 0), chg = cashP.reduce((s, o) => s + Number(o.change_given || 0), 0), recv = cashP.reduce((s, o) => s + Number(o.cash_received ?? (Number(o.total) + Number(o.tip || 0))), 0);
+  $('s-cash').innerHTML = [['Cash collected', money(cashIn), `<div class="d">${cashP.length} cash payment${cashP.length === 1 ? '' : 's'} · in the till</div>`], ['Tips', money(tips), `<div class="d">${pays.filter(o => Number(o.tip) > 0).length} tipped</div>`],
+    ['Change given', money(chg), `<div class="d">from ${money(recv)} handed over</div>`], ['Promo + points', money(valid.reduce((s, o) => s + Number(o.promo_discount || 0) + Number(o.points_discount || 0), 0)), `<div class="d">${valid.filter(o => o.promo_code).length} promo · ${valid.filter(o => Number(o.points_redeemed) > 0).length} points</div>`]]
+    .map(([k, v, d]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div>${d}</div>`).join('');
   // top sellers
   const agg = new Map(); valid.forEach(o => (o.items || []).forEach(i => { const k = `${i.name} · ${i.variant || ''}`; const x = agg.get(k) || { k, qty: 0, rev: 0 }; x.qty += Number(i.qty) || 0; x.rev += (Number(i.price) || 0) * (Number(i.qty) || 0); agg.set(k, x); }));
   const top = [...agg.values()].sort((x, y) => y.rev - x.rev).slice(0, 6), mx = top[0]?.rev || 1;
@@ -965,16 +1173,28 @@ function renderInsights() {
     ['Est. gross profit', costed ? `${money(costed - cost)} · ${Math.round((costed - cost) / costed * 100)}%` : '<span class="muted small">Add cost prices</span>']
   ].map(([k, v]) => `<div class="row static"><div class="grow t">${k}</div><div class="end num">${v}</div></div>`).join('');
 }
+function paidInRange(a, b) { return S.orders.filter(o => o.paid && o.status !== 'cancelled' && (k => k >= a && k <= b)(dayKey(o.paid_at || o.pickup_time))); }
+function exportPayments() {
+  const [a, b] = rangeKeys(), rows = paidInRange(a, b).sort((x, y) => new Date(x.paid_at || x.pickup_time) - new Date(y.paid_at || y.pickup_time));
+  if (!rows.length) return toast('No payments in this period', true);
+  const head = ['Paid date', 'Paid time', 'Order #', 'Customer', 'Phone', 'Method', 'Subtotal', 'Discount', 'Promo code', 'Promo discount', 'Points redeemed', 'Points discount', 'Total', 'Cash received', 'Change given', 'Tip', 'Cash kept', 'Paid by', 'Source'];
+  const body = rows.map(o => { const t = o.paid_at || o.pickup_time; return [dayKey(t), hm(t), o.order_no, o.customer_name, o.customer_phone, o.payment_method ? PAY[o.payment_method] : '', Number(o.subtotal || o.total).toFixed(2), Number(o.discount || 0).toFixed(2), o.promo_code || '', Number(o.promo_discount || 0).toFixed(2), o.points_redeemed || 0, Number(o.points_discount || 0).toFixed(2), Number(o.total).toFixed(2),
+    o.cash_received != null ? Number(o.cash_received).toFixed(2) : '', o.change_given != null ? Number(o.change_given).toFixed(2) : '', Number(o.tip || 0).toFixed(2), o.payment_method === 'cash' ? cashKept(o).toFixed(2) : '', o.paid_by || '', isCustApp(o) ? 'Customer app' : 'Staff'].map(csvCell).join(','); });
+  const blob = new Blob(['\ufeff' + [head.join(','), ...body].join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const el = document.createElement('a'); el.href = URL.createObjectURL(blob); el.download = `rasoi-payments_${a}_to_${b}.csv`; document.body.appendChild(el); el.click();
+  setTimeout(() => { URL.revokeObjectURL(el.href); el.remove(); }, 500); toast(`Exported ${rows.length} payments`);
+}
 function csvCell(v) { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
 function exportCSV() {
   const [a, b] = rangeKeys(), rows = inRange(a, b).sort((x, y) => new Date(x.pickup_time) - new Date(y.pickup_time));
   if (!rows.length) return toast('No orders in this period', true);
-  const head = ['Order #', 'Status', 'Pickup date', 'Pickup time', 'Customer', 'Phone', 'Items', 'Item count', 'Subtotal', 'Discount', 'Total', 'Payment', 'Paid', 'Notes', 'Placed (NZ)', 'Taken by'];
+  const head = ['Order #', 'Status', 'Pickup date', 'Pickup time', 'Customer', 'Phone', 'Items', 'Item count', 'Subtotal', 'Discount', 'Promo code', 'Total', 'Payment', 'Paid', 'Cash received', 'Change', 'Tip', 'Notes', 'Placed (NZ)', 'Taken by'];
   const body = rows.map(o => [o.order_no, ST_LABEL[o.status], dayKey(o.pickup_time), hm(o.pickup_time), o.customer_name, o.customer_phone, itemsText(o), itemsCount(o),
-    Number(o.subtotal || o.total).toFixed(2), Number(o.discount || 0).toFixed(2), Number(o.total).toFixed(2), o.payment_method ? PAY[o.payment_method] : '', o.paid ? 'Yes' : 'No', o.notes,
+    Number(o.subtotal || o.total).toFixed(2), Number(o.discount || 0).toFixed(2), o.promo_code || '', Number(o.total).toFixed(2), o.payment_method ? PAY[o.payment_method] : '', o.paid ? 'Yes' : 'No',
+    o.cash_received != null ? Number(o.cash_received).toFixed(2) : '', o.change_given != null ? Number(o.change_given).toFixed(2) : '', Number(o.tip || 0).toFixed(2), o.notes,
     `${dayKey(o.created_at)} ${hm(o.created_at)}`, o.created_by].map(csvCell).join(','));
   const blob = new Blob(['\ufeff' + [head.join(','), ...body].join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const el = document.createElement('a'); el.href = URL.createObjectURL(blob); el.download = `chopsticks-chaat-orders_${a}_to_${b}.csv`; document.body.appendChild(el); el.click();
+  const el = document.createElement('a'); el.href = URL.createObjectURL(blob); el.download = `rasoi-orders_${a}_to_${b}.csv`; document.body.appendChild(el); el.click();
   setTimeout(() => { URL.revokeObjectURL(el.href); el.remove(); }, 500); toast(`Exported ${rows.length} orders`);
 }
 
@@ -988,6 +1208,10 @@ function renderSettings() {
       <div class="field"><label>Low-stock alert</label><input id="g-low" inputmode="numeric" value="${esc(S.settings.low_stock_default)}"><span class="unit">pcs</span></div></div>
     <p class="form-note">Default alert level for items without their own. Times are shown in NZ time (Pacific/Auckland).</p>
     <div style="padding:10px 0 0"><button class="btn block" data-a="saveSettings">Save business settings</button></div>
+    ${shopSettingsHTML()}
+    <div class="form-h">Promotions &amp; loyalty</div><div class="list">
+      <button class="row" data-a="openPromos">${icon('tag', 'sm')}<span class="grow"><span class="t">Promotions</span><span class="s" style="display:block">${S.promos.filter(p => !p.archived && p.active).length} active · ${S.promos.filter(p => !p.archived).length} total</span></span><span class="chev">${icon('chev', 'sm')}</span></button>
+      <button class="row" data-a="openLoyalty">${icon('star', 'sm')}<span class="grow"><span class="t">Loyalty customers</span><span class="s" style="display:block">${num(S.customers.length)} customers · ${num(S.customers.reduce((a, c) => a + c.points, 0))} points outstanding</span></span><span class="chev">${icon('chev', 'sm')}</span></button></div>
     <div class="form-h">Staff</div><div class="list">${S.staff.map(s => `<div class="row static">${icon('user', 'sm')}<div class="grow"><div class="t">${esc(s.name || s.email.split('@')[0])}${s.email === me.toLowerCase() ? ' <span class="muted small">(you)</span>' : ''}</div><div class="s">${esc(s.email)}</div></div>
       <span class="chip ${s.role === 'owner' ? 'st-completed' : 'tag-muted'}">${s.role === 'owner' ? 'Owner' : 'Staff'}</span>
       ${isOwner() && s.role !== 'owner' ? `<button class="iconbtn" style="color:var(--red)" data-a="rmStaff" data-em="${esc(s.email)}" aria-label="Remove ${esc(s.email)}">${icon('trash', 'sm')}</button>` : ''}</div>`).join('')}</div>
@@ -999,7 +1223,28 @@ function renderSettings() {
       <div class="row static">${icon('mail', 'sm')}<div class="grow"><div class="t">${esc(me)}</div><div class="s">${isOwner() ? 'Owner' : 'Staff'} · ${liveHTML()}</div></div></div>
       <button class="row" data-a="changePw">${icon('lock', 'sm')}<span class="grow t">Change password</span><span class="chev">${icon('chev', 'sm')}</span></button>
       <button class="row" data-a="signOut" style="color:var(--red)">${icon('logout', 'sm')}<span class="grow t">Sign out</span></button></div>
-    <p class="small muted mt2" style="text-align:center">${esc(BRAND.name)} · ${esc(BRAND.tagline)} · live sync across all your devices</p>`;
+    <p class="small muted mt2" style="text-align:center"><img src="${BRAND.word}" alt="rasoi deli + kitchen" width="120" style="height:auto;display:block;margin:0 auto 6px">live sync across all your devices</p>`;
+}
+
+function shopSettingsHTML() {
+  const st = S.settings, t = v => String(v || '').slice(0, 5), od = st.open_days || [1, 2, 3, 4, 5, 6, 7], l = L();
+  return `<div class="form-h">Customer ordering</div><div class="form">
+      <div class="field"><label>Opens</label><input id="g-open" type="time" step="900" value="${esc(t(st.open_time) || '12:00')}"></div>
+      <div class="field"><label>Last pickup</label><input id="g-close" type="time" step="900" value="${esc(t(st.close_time) || '21:00')}"></div>
+      <div class="field"><label>Min notice</label><input id="g-notice" inputmode="numeric" value="${esc(st.min_notice_minutes ?? 60)}"><span class="unit">min</span></div>
+      <div class="field"><label>Days ahead</label><input id="g-days" inputmode="numeric" value="${esc(st.max_days_ahead ?? 14)}"><span class="unit">days</span></div></div>
+    <div class="daypick mt" role="group" aria-label="Open days">${WD.map((d, i) => `<button class="${od.includes(i + 1) ? 'on' : ''}" data-a="toggleDay" data-d="${i + 1}" aria-pressed="${od.includes(i + 1)}">${d}</button>`).join('')}</div>
+    <p class="form-note">Customers can pick a pickup time between these hours, on these days, at least the notice period ahead (NZ time). Pickup only, cash only.</p>
+    <div class="form-h">Bulk orders contact</div><div class="form">
+      <div class="field"><label>Phone</label><input id="g-cphone" type="tel" inputmode="tel" value="${esc(st.contact_phone || '')}" placeholder="Not set (hidden)" maxlength="20"></div>
+      <div class="field"><label>Email</label><input id="g-cemail" type="email" inputmode="email" value="${esc(st.contact_email || '')}" placeholder="Not set (hidden)" maxlength="120"></div>
+      <div class="field col"><label>Bulk note</label><input id="g-bulk" value="${esc(st.bulk_note || '')}" maxlength="200"></div></div>
+    <p class="form-note">Shown on the customer menu in the “Bulk orders” card. Leave phone and email blank to hide the contact line.</p>
+    <div class="form-h">Loyalty rules</div><div class="form">
+      <div class="field"><label>Loyalty on</label><span class="grow" style="flex:1"></span><label class="switch"><input type="checkbox" id="g-loy" ${l.on ? 'checked' : ''}><span></span></label></div>
+      <div class="field"><label>Points per $1</label><input id="g-earn" inputmode="decimal" value="${esc(l.earn)}"></div>
+      <div class="field"><label>Redeem</label><input id="g-rp" inputmode="numeric" value="${esc(l.blk)}"><span class="unit">points =</span><input id="g-rv" inputmode="decimal" value="${esc(l.val)}" style="max-width:70px"><span class="unit">$ off</span></div></div>
+    <div style="padding:10px 0 0"><button class="btn block" data-a="saveShop">Save ordering &amp; loyalty settings</button></div>`;
 }
 
 /* ---------- events ---------- */
@@ -1012,6 +1257,38 @@ const A = {
   oseg: el => { S.of.seg = el.dataset.k; renderOrders(); },
   openOrder: el => { const b = $('neworder'); if (b && el.closest('#neworder')) b.classList.remove('on'); openOrder(el.dataset.id); },
   dismissAlert: () => { const b = $('neworder'); if (b) b.classList.remove('on'); },
+  acceptAlert: el => { const b = $('neworder'); if (b) b.classList.remove('on'); return accept(el.dataset.id, el); },
+  accept: el => accept(el.dataset.id, el),
+  paidCash: el => paidCash(el.dataset.id, el),
+  cashSheet: el => openCash(el.dataset.id),
+  cashPick: el => { S.cash.custom = ''; S.cash.received = el.dataset.n === 'exact' ? null : Number(el.dataset.n); const st = $('sheet-body').scrollTop; $('sheet-body').innerHTML = cashBody(); $('sheet-body').scrollTop = st; $('sheet-foot').innerHTML = cashFoot(); buzz(); },
+  cashConfirm: el => cashConfirm(el),
+  backToCart: () => openCheckout(),
+  placePaidCash: el => placeOrder(el, { received: null, tip: false }).catch(() => { }),
+  cartPts: el => { S.cart.points = +el.dataset.n; updateCartTotals(); buzz(); },
+  redeem: async el => { const id = el.dataset.id; const r = await busy(el, () => rpc('set_order_discounts', { p_order_id: id, p_redeem_points: +el.dataset.n })); applyRow('orders', r); toast(+el.dataset.n ? `${num(el.dataset.n)} points redeemed · −${money(r.points_discount)}` : 'Points removed from order'); rerender(); },
+  applyPromo: async el => { const code = ($('od-code').value || '').trim().toUpperCase(); if (!code) return toast('Enter a promo code', true); const r = await busy(el, () => rpc('set_order_discounts', { p_order_id: el.dataset.id, p_promo_code: code })); applyRow('orders', r); toast(`${r.promo_code} applied · −${money(r.promo_discount)}`); rerender(); },
+  removePromo: async el => { const r = await busy(el, () => rpc('set_order_discounts', { p_order_id: el.dataset.id, p_promo_code: '' })); applyRow('orders', r); toast('Promo removed'); rerender(); },
+  pickPromo: el => { const i = $('od-code'); if (i) i.value = el.dataset.code; },
+  openPromos: () => openPromos(), editPromo: el => openPromoEditor(el.dataset.id || null), savePromo: el => savePromo(el).catch(() => { }), pf: el => { S.pf = el.dataset.k; $('sheet-body').innerHTML = promosBody(); },
+  peKind: el => { S.pe.kind = el.dataset.k; $('sheet-body').innerHTML = promoEditorBody(); },
+  archivePromo: async el => { const p = S.promos.find(x => x.id === el.dataset.id); if (!p || !confirm(`Archive ${p.code}? It stops working but its history is kept.`)) return;
+    const r = await busy(el, () => q(sb.from('promotions').update({ archived: true, active: false, show_on_menu: false, updated_at: new Date().toISOString() }).eq('id', p.id).select().single())); applyRow('promotions', r); toast(`${r.code} archived`); openPromos(); },
+  unarchivePromo: async el => { const r = await busy(el, () => q(sb.from('promotions').update({ archived: false, updated_at: new Date().toISOString() }).eq('id', el.dataset.id).select().single())); applyRow('promotions', r); toast(`${r.code} restored (switched off)`); refreshSheet(); },
+  openLoyalty: () => openLoyalty(), openCustomer: el => openCustomer(el.dataset.id),
+  exportPayments: () => exportPayments(),
+  toggleDay: el => { el.classList.toggle('on'); el.setAttribute('aria-pressed', el.classList.contains('on')); },
+  saveShop: async el => {
+    const days = [...document.querySelectorAll('.daypick button.on')].map(b => +b.dataset.d), n = parseInt($('g-notice').value, 10), dd = parseInt($('g-days').value, 10);
+    const earn = Number($('g-earn').value), rp = parseInt($('g-rp').value, 10), rv = Number($('g-rv').value);
+    if (!days.length) return toast('Choose at least one open day', true);
+    if (!(n >= 0 && n <= 1440)) return toast('Min notice must be 0–1440 minutes', true);
+    if (!(dd >= 1 && dd <= 60)) return toast('Days ahead must be 1–60', true);
+    if (!($('g-open').value < $('g-close').value)) return toast('Opening time must be before last pickup', true);
+    if (!(earn >= 0) || !(rp >= 1) || !(rv > 0)) return toast('Check the loyalty numbers', true);
+    const r = await busy(el, () => rpc('save_shop_settings', { p: { open_time: $('g-open').value, close_time: $('g-close').value, min_notice_minutes: n, max_days_ahead: dd, open_days: days,
+      contact_phone: $('g-cphone').value.trim(), contact_email: $('g-cemail').value.trim(), bulk_note: $('g-bulk').value.trim(), loyalty_enabled: $('g-loy').checked, loyalty_earn_per_dollar: earn, loyalty_redeem_points: rp, loyalty_redeem_value: rv } }));
+    S.settings = r; toast('Ordering & loyalty settings saved'); renderSettings(); },
   advance: (el) => { const o = S.orders.find(x => x.id === el.dataset.id); if (o && NEXT[o.status]) setStatus(o.id, NEXT[o.status], el); },
   cancelOrder: el => setStatus(el.dataset.id, 'cancelled', el),
   setStatus: el => setStatus(el.dataset.id, el.dataset.s, el),
@@ -1069,11 +1346,16 @@ document.addEventListener('change', async e => {
   const t = e.target, a = t.dataset.a;
   if (a === 'togglePaid') { const o = S.orders.find(x => x.id === t.dataset.id); try { const r = await q(sb.from('orders').update({ paid: t.checked }).eq('id', o.id).select().single()); applyRow('orders', r); toast(r.paid ? `#${r.order_no} marked paid` : `#${r.order_no} marked unpaid`); buzz(); rerender(); } catch (err) { t.checked = !t.checked; toast(errMsg(err), true); } }
   if (a === 'toggleActive') { const p = prodById(t.dataset.id); try { const r = await q(sb.from('products').update({ active: t.checked }).eq('id', p.id).select().single()); applyRow('products', r); toast(r.active ? `${p.name} is on the menu` : `${p.name} hidden from menu`); rerender(); } catch (err) { t.checked = !t.checked; toast(errMsg(err), true); } }
+  if (t.id === 'cash-tip') { S.cash.tip = t.checked; cashUpdate(); }
+  if (a === 'togglePromo') { try { const r = await q(sb.from('promotions').update({ active: t.checked, updated_at: new Date().toISOString() }).eq('id', t.dataset.id).select().single()); applyRow('promotions', r); toast(r.active ? `${r.code} is on` : `${r.code} is off`); refreshSheet(); } catch (err) { t.checked = !t.checked; toast(errMsg(err), true); } }
+  if (t.dataset.pe2 && t.type === 'checkbox') S.pe[t.dataset.pe2] = t.checked;
   if (t.id === 's-from' || t.id === 's-to') { S.ins.from = $('s-from').value; S.ins.to = $('s-to').value; renderInsights(); }
 });
 document.addEventListener('input', e => {
   const t = e.target, d = t.dataset, val = t.type === 'checkbox' ? t.checked : t.value;
-  if (d.c) { S.cart[d.c] = val; if (d.c === 'discount') updateCartTotals(); }
+  if (t.id === 'cash-custom') { S.cash.custom = t.value.replace(/[^0-9.]/g, ''); if (S.cash.custom !== '') S.cash.received = null; document.querySelectorAll('.cashgrid .btn').forEach(b => b.classList.remove('primary')); cashUpdate(); return; }
+  if (d.pe2) { S.pe[d.pe2] = val; return; }
+  if (d.c) { S.cart[d.c] = val; if (['discount', 'promo', 'phone'].includes(d.c)) { if (d.c === 'phone' && !custByPhone(val)) S.cart.points = 0; updateCartTotals(); } }
   else if (d.j) { S.adj[d.j] = val; if (d.j === 'amt') adjPreview(); }
   else if (d.pe) { S.ped[d.pe] = val; }
   else if (d.e) { if (d.e === 'pool') { S.ed.pool = val; const st = $('sheet-body').scrollTop; $('sheet-body').innerHTML = editorBody(); $('sheet-body').scrollTop = st; return; } if (d.e.startsWith('v:')) { const [, i, f] = d.e.split(':'); S.ed.variants[+i][f] = val; } else S.ed[d.e] = val; }

@@ -468,7 +468,7 @@ body{line-height:1.4}
 @media (min-width:1100px){#i-stats.stats{grid-template-columns:repeat(6,1fr)}}
 
 /* =====================================================================
-   v5 — Chopsticks & Chaat: deep maroon + gold, warm cream, airy & premium.
+   v5 brand layer (superseded by the v7 rasoi block at the end of this file).
    Additive overrides only.
    ===================================================================== */
 :root{
@@ -554,3 +554,89 @@ body{background:radial-gradient(1200px 520px at 50% -180px,rgba(201,154,58,.10),
 .neworder .no-x{flex:none;width:44px;min-height:44px;border:0;border-radius:12px;background:none;color:inherit;opacity:.75;cursor:pointer;display:grid;place-items:center}
 @keyframes noPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
 @media (prefers-reduced-motion:reduce){.neworder{transition:none}.neworder .no-ic{animation:none}}
+
+/* ===================== rasoi · DELI + KITCHEN (v7 rebrand: teal, high contrast) ===================== */
+:root{
+  --bg:#F3F8F4; --card:#FFFFFF; --card2:#FBFAF5; --fill:rgba(10,92,86,.07); --fill2:rgba(10,92,86,.045);
+  --text:#0F1F1C; --text2:rgba(15,40,36,.70); --text3:rgba(15,40,36,.40); --sep:rgba(10,60,56,.12);
+  --accent:#0A5C56; --accent-ink:#0A5C56; --accent-soft:rgba(10,92,86,.10);
+  --maroon:#0A5C56; --maroon-deep:#064E3B; --gold:#0A5C56; --gold-soft:rgba(10,92,86,.14); --gold-ink:#0A5C56;
+  --red:#C2261B; --green:#0A7A52; --mint:#F3F8F4; --cream:#FBFAF5;
+  --shadow:0 1px 2px rgba(6,78,59,.05),0 10px 30px rgba(6,78,59,.07); --shadow-lg:0 20px 60px rgba(6,50,40,.22);
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#06130F; --card:#0F201B; --card2:#152A24; --fill:rgba(160,220,200,.10); --fill2:rgba(160,220,200,.06);
+  --text:#F1F8F4; --text2:rgba(225,242,235,.68); --text3:rgba(225,242,235,.34); --sep:rgba(225,242,235,.11);
+  --accent:#2FA595; --accent-ink:#7FD8C9; --accent-soft:rgba(127,216,201,.13);
+  --maroon:#2FA595; --maroon-deep:#0A5C56; --gold:#7FD8C9; --gold-soft:rgba(127,216,201,.15); --gold-ink:#7FD8C9; --red:#FF6B5E;
+}}
+body{background:var(--bg)}
+.btn.primary{background:#0A5C56;color:#fff;box-shadow:0 8px 20px rgba(10,92,86,.22)}
+.btn.primary:active{background:#064E3B}
+@media (prefers-color-scheme:dark){.btn.primary{background:#0E7A70;box-shadow:none}}
+.cartbar{background:#064E3B;color:#fff}
+.cartbar .cnt,.var .q,.tab .badge{background:#fff;color:#064E3B}
+.tab .badge{background:#0A5C56;color:#fff}
+.switch input:checked+span,.remember input:checked+.box{background:#0A5C56;border-color:#0A5C56}
+.remember input:checked+.box::after{border-color:#fff}
+.chip.src-app{background:rgba(10,92,86,.10);color:#0A5C56;border-color:rgba(10,92,86,.35)}
+.neworder{background:#0A5C56;color:#fff;box-shadow:0 18px 40px -12px rgba(6,78,59,.6)}
+.neworder.app{background:linear-gradient(135deg,#0A5C56,#064E3B)}
+.neworder .no-ic{background:#fff;color:#064E3B}
+.neworder .no-view{background:rgba(255,255,255,.16)}
+.neworder .no-accept{flex:none;display:inline-flex;align-items:center;gap:6px;padding:0 14px;min-height:44px;align-self:center;border:0;border-radius:12px;background:#fff;color:#064E3B;font:inherit;font-weight:700;font-size:14.5px;cursor:pointer}
+.neworder .no-accept svg{width:16px;height:16px}
+/* brand imagery: Preet's logo used as-is, no filters */
+.tb-brand img,.side-brand img{border-radius:10px;box-shadow:none;background:#fff;object-fit:cover}
+.tb-brand .n,.side-brand .sb-t{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:#0A5C56;font-weight:800;letter-spacing:-.01em}
+.tb-brand .tg,.side-brand .sb-t em{color:#064E3B;letter-spacing:.16em}
+@media (prefers-color-scheme:dark){.tb-brand .n,.side-brand .sb-t{color:var(--text)}.tb-brand .tg,.side-brand .sb-t em{color:var(--accent-ink)}}
+.largetitle{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;font-weight:800}
+.brand-hero{background:#fff;border-radius:24px;padding:18px 16px 14px;box-shadow:var(--shadow)}
+.brand-logo{width:120px;height:120px;border-radius:0;box-shadow:none;margin:0 auto 4px;object-fit:contain}
+.brand-word{display:block;width:200px;max-width:70%;height:auto;margin:0 auto}
+.brand-sub{margin-top:6px;font-size:12px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:#064E3B}
+/* quick actions on order rows */
+.qacts{display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px 12px;margin-top:-6px;background:var(--card);border-radius:0 0 var(--r) var(--r)}
+.qacts:empty{display:none}
+.btn.sm{min-height:38px}
+.btn.cashbtn{background:#064E3B;color:#fff}
+.btn.plainish{background:var(--fill);color:var(--accent-ink)}
+.paybar{display:grid;grid-template-columns:1.4fr 1fr;gap:10px}
+.placebar{display:grid;gap:10px}.placebar2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.placebar2 .block{grid-column:1/-1}
+.chipsrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.row.col{flex-direction:column;align-items:stretch}
+.codein{flex:1;min-width:110px;height:38px;border:1.5px solid var(--sep);border-radius:10px;padding:0 12px;font:inherit;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--card2);color:var(--text)}
+.loy{display:flex;gap:10px;align-items:flex-start;margin:10px 0 0;padding:12px 14px;border-radius:var(--r);background:var(--accent-soft);color:var(--text)}
+.loy svg{color:#0A5C56;flex:none;margin-top:2px}.loy b{display:block}.loy small{display:block;color:var(--text2);font-size:13px}
+.more-pay{margin-top:14px}.more-pay summary{cursor:pointer;color:var(--text2);font-size:14px;padding:6px 0}
+/* cash sheet */
+.cash-hero{text-align:center;padding:18px 12px;border-radius:var(--r-lg);background:#064E3B;color:#fff}
+.cash-hero .v{font-size:44px;font-weight:800;letter-spacing:-.02em;line-height:1.1;margin:4px 0}
+.cash-hero .k{opacity:.85;font-size:14px}
+.cashgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.cashgrid .btn{min-height:56px;font-size:18px;font-weight:800}
+.change{margin-top:14px;padding:16px;border-radius:var(--r-lg);text-align:center;background:var(--accent-soft);color:#064E3B}
+.change .v{font-size:38px;font-weight:800;line-height:1.1}
+.change .k{font-size:14px;color:var(--text2)}
+.change.bad{background:rgba(194,38,27,.08);color:var(--red)}.change.bad .k{color:var(--red)}
+@media (prefers-color-scheme:dark){.change{color:var(--accent-ink)}}
+.tiprow{display:flex;align-items:center;gap:12px;margin-top:12px;padding:12px 16px;background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);cursor:pointer}
+.tiprow input{position:absolute;opacity:0;width:1px;height:1px}
+.tiprow small{display:block;color:var(--text2);font-size:13px;margin-top:2px}
+.tiprow .switch{pointer-events:none}
+.tiprow input:checked~.switch span{background:#0A5C56}
+.tiprow input:checked~.switch span::after{transform:translateX(20px)}
+.tiprow.dim{opacity:.5;cursor:default}
+.promo-row .code{font-family:ui-monospace,Menlo,monospace;letter-spacing:.04em;color:#0A5C56}
+.daypick{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.daypick button{min-height:44px;border:1.5px solid var(--sep);border-radius:12px;background:var(--card);color:var(--text2);font:inherit;font-weight:700;cursor:pointer}
+.daypick button.on{background:#0A5C56;border-color:#0A5C56;color:#fff}
+.field .unit{flex:none;color:var(--text2);font-size:14px}
+/* v7: clean sans body (Inter) + handwritten-script section headings (Caveat), like a deli menu board */
+body{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.largetitle{font-family:"Caveat","Bradley Hand",cursive;font-weight:700;font-size:44px;letter-spacing:0;line-height:1;color:#0A5C56;margin:6px 0 8px}
+.section-h b{font-family:"Caveat","Bradley Hand",cursive;font-weight:700;font-size:28px;letter-spacing:0;color:#0A5C56}
+.panel h3,.sheet-head h2{font-family:"Caveat","Bradley Hand",cursive;font-weight:700;font-size:28px;letter-spacing:0;color:#0A5C56}
+@media (prefers-color-scheme:dark){.largetitle,.section-h b,.panel h3,.sheet-head h2{color:var(--accent-ink)}}
+.cashgrid .btn[disabled]{opacity:.38}

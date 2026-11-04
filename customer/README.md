@@ -1,9 +1,9 @@
-# Chopsticks & Chaat — customer ordering app
+# rasoi · DELI + KITCHEN — customer pickup ordering app
 
 Static site (no build). Live: https://chopsticks-chaat.vercel.app (Vercel project `chopsticks-chaat`).
 
-- `index.html`, `styles.css`, `app.js`, `brand/` (logo.svg, apple-touch-icon.png, og.jpg)
-- Talks to Supabase only via the public RPCs `get_public_menu()` and `place_customer_order(...)` with the anon key
-  (prices, stock and limits are enforced server-side; see `supabase/` migrations v5/v6).
-- The production deploy inlines `styles.css` into `index.html` (deploy tooling limit); keep both in sync.
-- Opening hours / lead time / slot step live in `CFG` at the top of `app.js`.
+- `index.html`, `styles.css`, `app.js`, `brand/rasoi/` (Preet's logo, unmodified, plus crops/resizes — see `brand/rasoi/README.md`)
+- Talks to Supabase only via the public RPCs `get_public_menu()`, `get_public_info()`, `get_checkout_quote(...)`,
+  `get_points_balance(phone)` and `place_customer_order(...)` with the anon key. Prices, stock, opening hours, notice,
+  days ahead and promo codes are enforced server-side from `settings` / `promotions`.
+- Pickup only, cash only (pay at pickup). Hours / notice / contact / loyalty rules are edited by staff in the staff app Settings.

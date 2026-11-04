@@ -1,6 +1,6 @@
-# VegPOS
+# rasoi · DELI + KITCHEN — staff app (VegPOS)
 
-Order-taking, sales and inventory app for VegPOS, styled like an iPhone app. It's a static site (`index.html`, `styles.css`, `app.js`) with no build step, deployed on Vercel and backed by Supabase.
+Order-taking, sales and inventory app for rasoi (internal name VegPOS), styled like an iPhone app. It's a static site (`index.html`, `styles.css`, `app.js`) with no build step, deployed on Vercel and backed by Supabase.
 
 ## Features
 - **Orders**: take orders from a tap-to-add menu with size options. Each order has a customer name and phone, pickup date and time, notes, payment method, paid status and discount. You can also edit, search and filter orders (Active, Completed, Cancelled, by day). Orders show "due soon" and "overdue" badges and a status flow (Pending → Preparing → Ready → Completed). Cancelling an order puts its stock back. You can print a receipt for any order.
@@ -46,13 +46,41 @@ cost prices exist), Low / Out of stock counts, the header, the Low-stock filter 
 (which skip own-stock movements of now-linked products). Linked rows show "Uses <stock>: N pcs" and a "Shared" pill.
 No SQL change was needed: there are no views, and the stock functions route linked products to the shared row only.
 
-### v5 — Chopsticks & Chaat rebrand + Remember me
-- Staff app branded **Chopsticks & Chaat** ("Desi. Crispy. Zingy."): deep maroon + gold on warm cream, serif display type.
-  Brand assets live in `/brand` — replace `brand/logo.svg`, `brand/apple-touch-icon.png` (180×180) and `brand/icon-512.png`
-  with the real logo (same file names) and it changes everywhere (login, header, sidebar, favicon, home-screen icon).
+### v5 — interim rebrand + Remember me
+- (The v5 placeholder brand and its SVG assets were replaced by the rasoi brand in v7.)
   Name/tagline are in the `BRAND` constant at the top of `app.js`. Internal names (repo, URL, realtime channel) stay "vegpos".
   The shown business name is Settings → Business name, unless it is still the old default "VegPOS", which shows as the brand.
 - **Remember me** (ticked by default): session kept in localStorage with token auto-refresh, last email prefilled.
   Unticked: session in sessionStorage (this tab only), email not saved. The password is never stored by the app —
   `autocomplete="username"` / `"current-password"` lets iCloud Keychain / browser password managers save and autofill it.
   Sign out clears the session from both storages (scope: this device).
+
+## v7 — rasoi rebrand, pickup hours, quick cash, loyalty, promotions
+
+**Brand.** rasoi · DELI + KITCHEN. Teal #0A5C56 (deep #064E3B) on light mint/cream, Inter body text, Caveat script headings.
+Logo: `brand/rasoi/rasoi-logo.jpg` is Preet's final file, byte-identical (sha1 `52af1889ebd4a05680e448a6c99e6b2fb5b084f1`);
+every other file in `brand/rasoi/` is a straight conversion/crop/resize of it (see `brand/rasoi/README.md`). No filters are applied in CSS.
+The customer project serves its own copies from `customer/brand/rasoi/`.
+
+**Customer app (`customer/`).** Pickup only, cash only (paid at pickup). Pickup slots 12:00 pm – 9:00 pm NZ time, at least
+60 minutes' notice ("Please order 1–2 hours ahead"), up to 14 days ahead. `place_customer_order` enforces the same rules from
+`settings` (open_time, close_time, min_notice_minutes, max_days_ahead, open_days). Optional promo code (validated and counted on
+the server), number-only points lookup (`get_points_balance`), menu banner for promotions with `show_on_menu`, and a
+"Bulk orders" card whose contact line shows `settings.contact_phone` / `contact_email` only once they are set
+(Settings → Customer ordering → Bulk orders contact).
+
+**Quick cash (staff).** One tap **Accept** (row, order sheet, and new-order banner) and one tap **Paid cash**
+(`mark_order_paid_cash`). **Cash received…** offers $20 / $50 / $100 / Exact or any amount, shows change due, and
+**Keep as tip** records the extra as a tip. Orders store `cash_received`, `change_given`, `tip`, `paid_at`, `paid_by`.
+A new order can be saved as paid cash in one tap (`save_order_full`). Insights → Cash shows cash collected, tips and change
+for the selected range, with a Payments CSV.
+
+**Loyalty.** Customers are keyed by phone (`customers`) with an append-only `loyalty_ledger`. Points are earned when an order is
+marked paid (default 1 point per $1) and reversed if it is cancelled or marked unpaid; 100 points = $10 off (defaults, editable
+in Settings → Loyalty rules). Staff see a customer's points on the order and redeem them in blocks (`set_order_discounts`).
+
+**Promotions.** Settings → Promotions: code, name, percent/fixed, value, minimum order, active, start/end, usage limit,
+show-on-menu. Archived, never deleted. Every use and reversal is logged in `promotion_uses`.
+
+Migrations: `vegpos_v7_hours_cash_loyalty_promos`, `vegpos_v7b_fix_notice_message`, `vegpos_v7c_points_lookup_rpc_hardening`
+(public anon RPCs are now thin SECURITY INVOKER wrappers over SECURITY DEFINER functions in the unexposed `customer_api` schema).
