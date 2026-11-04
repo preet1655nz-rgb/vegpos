@@ -369,8 +369,52 @@ function waButtons(o, cls = 'btn') {
 /* alerts: sound/vibration need one tap on this device (browser rule); system notifications need permission */
 const notifOK = () => 'Notification' in window;
 const alertsState = () => ({ sound: !!(audioCtx && audioCtx.state === 'running'), notif: notifOK() ? Notification.permission : 'unsupported' });
+/* ---------- v12: PWA + Web Push, so alerts arrive with the app closed (Home Screen app on iPhone iOS 16.4+, Android/desktop Chrome) ---------- */
+const VAPID_PUBLIC = 'BMbq6fNkFAseRvn7OTA7Yuc7LHwCDq2Ca8ePrvD4Mo6qFs8mlMBXGJc-0jT3GRcZNPXxD1EKfz69ayvlmBnS9Q4';
+const pushOK = () => 'serviceWorker' in navigator && 'PushManager' in window && notifOK();
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+const needsHomeScreen = () => isIOS() && !isStandalone();
+let swReg = null;
+function regSW() {
+  if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+  if (!swReg) swReg = navigator.serviceWorker.register('sw.js', { scope: './' }).catch(e => { console.warn('service worker', e); swReg = null; return null; });
+  return swReg;
+}
+const b64u = s => { const b = atob((s + '='.repeat((4 - s.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); };
+// subscribe this device (needs notification permission) and register it with the backend; safe to call on every start
+async function pushSubscribe() {
+  if (!pushOK() || Notification.permission !== 'granted') { S.push = false; return false; }
+  try {
+    const reg = await regSW(); if (!reg) return (S.push = false);
+    await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(VAPID_PUBLIC) });
+    const j = sub.toJSON();
+    const { error } = await sb.rpc('register_push_subscription', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_user_agent: navigator.userAgent.slice(0, 380) });
+    if (error) throw error;
+    S.push = true; return true;
+  } catch (e) { console.warn('push subscribe', e); S.push = false; S.pushErr = errMsg(e); return false; }
+}
+function iosHintHTML() {
+  return needsHomeScreen() ? `<div class="ios-hint" role="note">${icon('bell', 'xs')}<span><b>iPhone:</b> tap Share → <b>Add to Home Screen</b>, open rasoi from your Home Screen, then tap <b>Enable alerts</b>. Alerts then arrive even when the app is closed.</span></div>` : '';
+}
+// open an order from a notification tap: ?order=<id> on launch, or a message from the service worker
+async function openOrderFromPush(id) {
+  if (!id || !S.started) return;
+  if (!S.orders.find(o => o.id === id)) { try { await loadAll(); } catch (e) { } }
+  if (S.tab !== 'orders') go('orders');
+  try { ackAlert(id); } catch (e) { }
+  openOrder(id);
+}
+function openFromURL() {
+  const u = new URL(location.href), id = u.searchParams.get('order'); if (!id) return;
+  u.searchParams.delete('order'); history.replaceState(null, '', u.pathname + u.search + u.hash);
+  openOrderFromPush(id);
+}
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.type === 'open-order') openOrderFromPush(e.data.id); });
 function alertsBtnHTML() {
-  const a = alertsState(), on = a.sound && (a.notif === 'granted' || a.notif === 'unsupported');
+  const a = alertsState(), on = a.sound && (a.notif === 'granted' || a.notif === 'unsupported') && (S.push || !pushOK());
   return on ? `<span class="alerts-on" title="New-order alerts are on">${icon('bell', 'xs')}Alerts on</span>`
     : `<button class="btn sm alerts-btn" data-a="enableAlerts">${icon('bell', 'xs')}Enable alerts</button>`;
 }
@@ -378,8 +422,9 @@ async function enableAlerts() {
   unlockAudio();
   if (notifOK() && Notification.permission === 'default') { try { await Notification.requestPermission(); } catch (e) { } }
   setTimeout(() => { chime(); try { navigator.vibrate && navigator.vibrate(120); } catch (e) { } }, 60);
-  const a = alertsState();
-  toast(a.notif === 'granted' ? 'Alerts on: sound, vibration and notifications' : a.notif === 'denied' ? 'Sound alerts on. Notifications are blocked in this browser’s settings' : a.notif === 'unsupported' ? 'Sound alerts on (this browser has no system notifications)' : 'Sound alerts on');
+  const a = alertsState(), pushed = a.notif === 'granted' ? await pushSubscribe() : false;
+  if (needsHomeScreen() && !pushOK()) { toast('Sound alerts on. For alerts with the app closed: Share → Add to Home Screen, then tap Enable alerts there'); return rerender(); }
+  toast(a.notif === 'granted' ? (pushed ? 'Alerts on: this device gets new orders even when the app is closed' : 'Alerts on while the app is open (background alerts could not be set up' + (S.pushErr ? ': ' + S.pushErr : '') + ')') : a.notif === 'denied' ? 'Sound alerts on. Notifications are blocked in this browser’s settings' : a.notif === 'unsupported' ? 'Sound alerts on (this browser has no system notifications)' : 'Sound alerts on');
   rerender();
 }
 function sysNotify(o) {
@@ -459,6 +504,8 @@ async function start(session) {
   if (!S.me) { S.started = false; return showAuth('notstaff'); }
   $('boot').hidden = true; $('auth').hidden = true; $('shell').hidden = false;
   buildViews(); go(S.tab); subscribe();
+  regSW(); if (notifOK() && Notification.permission === 'granted') pushSubscribe().then(() => rerender());  // keep this device registered
+  openFromURL();
 }
 function stop() { S.started = false; S.me = null; if (S.ch) { sb.removeChannel(S.ch); S.ch = null; } Object.values(charts).forEach(c => c.destroy()); for (const k in charts) delete charts[k]; }
 
@@ -502,7 +549,7 @@ function buildViews() {
 const revenueOf = list => list.filter(o => o.status !== 'cancelled').reduce((a, o) => a + Number(o.total || 0), 0);
 function renderOrders() {
   const t = today(), long = keyDate(t).toLocaleDateString('en-NZ', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
-  $('o-head').innerHTML = header('Orders', long, `${alertsBtnHTML()} <button class="btn primary sm" data-a="go" data-t="new">${icon('plus', 'xs')} New order</button>`);
+  $('o-head').innerHTML = header('Orders', long, `${alertsBtnHTML()} <button class="btn primary sm" data-a="go" data-t="new">${icon('plus', 'xs')} New order</button>`) + iosHintHTML();
   const tod = S.orders.filter(o => dayKey(o.pickup_time) === t);
   const active = S.orders.filter(isActive);
   const next = active.slice().sort((a, b) => new Date(a.pickup_time) - new Date(b.pickup_time))[0];

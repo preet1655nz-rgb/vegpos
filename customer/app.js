@@ -148,7 +148,7 @@ async function loadMenu(quiet) {
   try {
     const { data, error } = await sb.rpc('get_public_menu');
     if (error) throw error;
-    S.menu = (data || []).map(p => ({ ...p, variants: (p.variants || []).map(v => ({ ...v, price: Number(v.price) })) }));
+    S.menu = (data || []).map(p => ({ ...p, in_stock: true, variants: (p.variants || []).map(v => ({ ...v, price: Number(v.price), available: true })) })); // v12: never sold out for customers
     reconcileCart(quiet); renderMenu(); updateBar(); if (S.sheet) refreshSheet();
   } catch (e) {
     if (quiet) return;
@@ -158,8 +158,11 @@ async function loadMenu(quiet) {
 }
 function reconcileCart(quiet) {
   const before = S.cart.length;
-  S.cart = S.cart.filter(l => { const v = lineVar(l); return v && v.available; });
-  if (S.cart.length !== before) { saveCart(); if (!quiet || S.sheet === 'cart' || S.sheet === 'checkout') toast('Some items just sold out and were removed from your cart', true); }
+  // only items staff removed from the menu drop out; labels refresh to the current menu (e.g. 8pcs -> Half)
+  S.cart = S.cart.filter(l => lineVar(l)); let relabel = false;
+  S.cart.forEach(l => { const v = lineVar(l); if (v.label !== l.label) { l.label = v.label; relabel = true; } });
+  if (S.cart.length !== before || relabel) saveCart();
+  if (S.cart.length !== before && (!quiet || S.sheet === 'cart' || S.sheet === 'checkout')) toast('Some items are no longer on the menu and were removed from your cart', true);
 }
 function cats() { const out = []; for (const p of S.menu) if (!out.includes(p.category)) out.push(p.category); return out; }
 const slug = s => 'c-' + String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -175,13 +178,13 @@ function renderMenu() {
   spy();
 }
 function cardHTML(p, i) {
-  const avail = p.variants.filter(v => v.available), from = Math.min(...(avail.length ? avail : p.variants).map(v => v.price));
-  const inCart = S.cart.filter(l => l.pid === p.id).reduce((s, l) => s + l.qty, 0), so = !p.in_stock;
-  return `<button class="card ${so ? 'soldout' : ''}" type="button" data-a="item" data-id="${p.id}" style="animation-delay:${i * 40}ms"
-      aria-label="${esc(p.name)}${so ? ', sold out' : `, from ${money(from)}`}${inCart ? `, ${inCart} in cart` : ''}">
+  const from = Math.min(...p.variants.map(v => v.price));
+  const inCart = S.cart.filter(l => l.pid === p.id).reduce((s, l) => s + l.qty, 0);
+  return `<button class="card" type="button" data-a="item" data-id="${p.id}" style="animation-delay:${i * 40}ms"
+      aria-label="${esc(p.name)}, from ${money(from)}${inCart ? `, ${inCart} in cart` : ''}">
     <span class="info"><span class="nm">${esc(p.name)}${inCart ? `<span class="incart">${inCart} in cart</span>` : ''}</span><span class="ds">${esc(blurb(p.name))}</span>
-      <span class="vs">${p.variants.map(v => `<span class="${v.available ? '' : 'x'}">${esc(v.label)} ${money(v.price)}</span>`).join('')}</span></span>
-    <span class="end">${so ? '<span class="badge-so">Sold out</span>' : `<span class="from">${p.variants.length > 1 ? '<small>from</small>' : ''}${money(from)}</span><span class="add" aria-hidden="true">${I.plus}</span>`}</span></button>`;
+      <span class="vs">${p.variants.map(v => `<span>${esc(v.label)} ${money(v.price)}</span>`).join('')}</span></span>
+    <span class="end"><span class="from">${p.variants.length > 1 ? '<small>from</small>' : ''}${money(from)}</span><span class="add" aria-hidden="true">${I.plus}</span></span></button>`;
 }
 let spyObs;
 function spy() {
@@ -234,27 +237,26 @@ function stepper(val, min, max, a, extra = '', label = 'Quantity') {
 /* item sheet */
 function openItem(id) {
   const p = prod(id); if (!p) return;
-  if (!p.in_stock) { toast(`${p.name} is sold out right now`, true); return; }
-  const first = p.variants.find(v => v.available);
+  const first = p.variants[0];
   S.item = { id, vidx: first ? first.index : null, qty: 1 };
   $('sheet').setAttribute('aria-labelledby', 'sh-title'); openSheet('item');
 }
 function itemSheet() {
   const p = prod(S.item.id); if (!p) return closeSheet();
   const v = p.variants.find(x => x.index === S.item.vidx);
-  if (v && !v.available) { const f = p.variants.find(x => x.available); S.item.vidx = f ? f.index : null; }
+  if (!v && p.variants[0]) S.item.vidx = p.variants[0].index;
   const sel = p.variants.find(x => x.index === S.item.vidx);
   $('sheet-body').innerHTML = `<h2 class="sh-title" id="sh-title">${esc(p.name)}</h2><p class="sh-sub">${esc(blurb(p.name))}</p>
     <div class="sh-h" id="opt-h">Choose a size <small>Required</small></div>
-    <div class="opts" role="radiogroup" aria-labelledby="opt-h">${p.variants.map(x => `<label class="opt ${x.index === S.item.vidx ? 'on' : ''} ${x.available ? '' : 'so'}">
-      <input type="radio" name="var" value="${x.index}" ${x.index === S.item.vidx ? 'checked' : ''} ${x.available ? '' : 'disabled'} data-a="var">
-      <span class="rd" aria-hidden="true"></span><span class="ol">${esc(x.label)}${x.available ? '' : ' <small class="so-tag">Sold out</small>'}</span><span class="op">${money(x.price)}</span></label>`).join('')}</div>
+    <div class="opts" role="radiogroup" aria-labelledby="opt-h">${p.variants.map(x => `<label class="opt ${x.index === S.item.vidx ? 'on' : ''}">
+      <input type="radio" name="var" value="${x.index}" ${x.index === S.item.vidx ? 'checked' : ''} data-a="var">
+      <span class="rd" aria-hidden="true"></span><span class="ol">${esc(x.label)}</span><span class="op">${money(x.price)}</span></label>`).join('')}</div>
     <div class="sh-h">Quantity</div><div class="qtyrow">${stepper(S.item.qty, 1, CFG.maxQty, 'iq')}<span style="color:var(--ink2);font-size:14px">${sel ? `${money(sel.price)} each` : ''}</span></div>`;
   $('sheet-foot').innerHTML = `<button class="btn split" type="button" data-a="addItem" ${sel ? '' : 'disabled'}><span>Add ${S.item.qty} to cart</span><span class="num">${sel ? money(sel.price * S.item.qty) : ''}</span></button>`;
 }
 function addItem() {
   const p = prod(S.item.id), v = p && p.variants.find(x => x.index === S.item.vidx);
-  if (!v || !v.available) return toast('Please choose an available size', true);
+  if (!v) return toast('Please choose a size', true);
   const ex = S.cart.find(l => l.pid === p.id && l.vidx === v.index);
   if (ex) ex.qty = Math.min(CFG.maxQty, ex.qty + S.item.qty); else S.cart.push({ pid: p.id, vidx: v.index, label: v.label, qty: S.item.qty });
   saveCart(); buzz(); closeSheet(); bump(); toast(`Added ${S.item.qty} × ${p.name} (${v.label})`);
@@ -296,7 +298,7 @@ async function refreshQuote(now) {
     if (!code && !okPhone) { S.quote = null; S.pts = null; const z = $('quote'); if (z) z.innerHTML = quoteHTML(); updatePlace(); return; }
     try {
       const [qr, pr] = await Promise.all([
-        sb.rpc('get_checkout_quote', { p_items: S.cart.map(l => ({ product_id: l.pid, variant: l.label, qty: l.qty })), p_promo_code: code || null }),
+        sb.rpc('get_checkout_quote', { p_items: S.cart.map(l => ({ product_id: l.pid, variant: l.label, variant_index: l.vidx, qty: l.qty })), p_promo_code: code || null }),
         okPhone ? sb.rpc('get_points_balance', { p_phone: phone }) : Promise.resolve({ data: null })]);
       if (qr.error) throw qr.error; if (seq !== quoteSeq) return;
       S.quote = qr.data; S.pts = pr && !pr.error ? pr.data : null; const z = $('quote'); if (z) z.innerHTML = quoteHTML(); updatePlace();
@@ -317,7 +319,7 @@ function checkoutSheet() {
     <h2 class="sh-title" id="sh-title">Checkout</h2><p class="sh-sub">${cartCount()} item${cartCount() === 1 ? '' : 's'} · pickup only · cash at pickup</p>
     <form id="ck" novalidate>
       <div class="f"><label for="ck-name">Your name</label><input id="ck-name" name="name" autocomplete="name" maxlength="80" required value="${esc(f.name)}" placeholder="So we can call you at the counter"></div>
-      <div class="f"><label for="ck-phone">Phone <small>(optional · for loyalty points)</small></label><input id="ck-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" value="${esc(f.phone)}" placeholder="e.g. 021 123 4567"></div>
+      <div class="f"><label for="ck-phone">Phone <small>(required · so we can contact you about your order)</small></label><input id="ck-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" required aria-describedby="ck-phone-h" value="${esc(f.phone)}" placeholder="e.g. 021 123 4567 or +64 21 123 4567"><small class="fh" id="ck-phone-h">NZ mobile or landline, at least 7 digits. Also earns loyalty points.</small></div>
       <div class="hp" aria-hidden="true"><label for="ck-web">Leave this empty</label><input id="ck-web" name="website" tabindex="-1" autocomplete="off"></div>
       <div class="f"><label id="day-l">Pickup time <small>(NZ time · ${esc(hoursText())})</small></label>
         <p class="hint">${I.clock}<span>Please order 1–2 hours ahead. The earliest pickup is ${CFG.noticeMins >= 60 && CFG.noticeMins % 60 === 0 ? `${CFG.noticeMins / 60} hour${CFG.noticeMins === 60 ? '' : 's'}` : `${CFG.noticeMins} minutes`} from now.</span></p>
@@ -331,18 +333,24 @@ function checkoutSheet() {
     </form>`;
   $('sheet-foot').innerHTML = `<button class="btn split" type="button" data-a="place" id="place" ${S.submitting || !days.length ? 'disabled' : ''}>${S.submitting ? '<span class="spin" aria-hidden="true"></span><span>Placing order…</span><span></span>' : `<span>Place pickup order</span><span class="num">${money(quoteTotal())}</span>`}</button>`;
   const keep = () => { S.form.name = $('ck-name').value; S.form.phone = $('ck-phone').value; S.ck.notes = $('ck-notes').value; save('rasoi_form_v1', S.form); };
-  ['ck-name', 'ck-phone', 'ck-notes'].forEach(id => $(id).addEventListener('input', e => { keep(); e.target.removeAttribute('aria-invalid'); if (id === 'ck-phone') refreshQuote(); }));
+  ['ck-name', 'ck-phone', 'ck-notes'].forEach(id => $(id).addEventListener('input', e => { keep(); e.target.removeAttribute('aria-invalid'); if (id === 'ck-phone') { const h = $('ck-phone-h'); if (h && h.classList.contains('err')) { h.classList.remove('err'); h.textContent = 'NZ mobile or landline, at least 7 digits. Also earns loyalty points.'; } refreshQuote(); } }));
   $('ck-code').addEventListener('input', e => { S.ck.code = e.target.value.toUpperCase(); if (!S.ck.code) { if (S.quote) S.quote.promo = null; $('quote').innerHTML = quoteHTML(); updatePlace(); } });
   $('ck-code').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); refreshQuote(true); } });
   const sel = $('sheet-body').querySelector('.slot.on'); if (sel) sel.scrollIntoView({ block: 'nearest' });
 }
 
+// v12: NZ-friendly phone check (021 123 4567, +64 21 123 4567, (09) 123 4567): 7-15 digits, + ( ) - and spaces allowed
+const okNZPhone = s => /^\+?[0-9 ()-]{6,20}$/.test(s) && (s.replace(/\D/g, '').length >= 7 && s.replace(/\D/g, '').length <= 15);
 async function placeOrder() {
   if (S.submitting) return;
   const name = $('ck-name').value.trim(), phone = $('ck-phone').value.trim(), notes = $('ck-notes').value.trim();
   if ($('ck-web').value) { toast('Something went wrong. Please try again.', true); return; } // honeypot: bots fill hidden fields
   if (!name) { $('ck-name').setAttribute('aria-invalid', 'true'); $('ck-name').focus(); return toast('Please enter your name', true); }
-  if (phone && !/^\+?[0-9 ()-]{6,20}$/.test(phone)) { $('ck-phone').setAttribute('aria-invalid', 'true'); $('ck-phone').focus(); return toast('Phone number looks invalid', true); }
+  if (!phone || !okNZPhone(phone)) {
+    const m = !phone ? 'Please enter your phone number so we can contact you about your order' : 'Please enter a valid phone number (at least 7 digits), e.g. 021 123 4567 or +64 21 123 4567';
+    $('ck-phone').setAttribute('aria-invalid', 'true'); const h = $('ck-phone-h'); if (h) { h.textContent = m; h.classList.add('err'); }
+    $('ck-phone').focus(); return toast(m, true);
+  }
   if (!S.ck.slot) return toast('Please choose a pickup time', true);
   if (new Date(S.ck.slot).getTime() < Date.now() - 60e3) { checkoutSheet(); return toast('That pickup time has passed — please pick another', true); }
   const last = Number(localStorage.getItem('rasoi_last_order_at') || 0), wait = Math.ceil((last + CFG.cooldownSec * 1e3 - Date.now()) / 1e3);
@@ -351,7 +359,7 @@ async function placeOrder() {
   try {
     const items = S.cart.map(l => ({ product_id: l.pid, variant: l.label, variant_index: l.vidx, qty: l.qty }));
     const code = (S.ck.code || '').trim().toUpperCase();
-    const { data, error } = await sb.rpc('place_customer_order', { p_customer_name: name, p_customer_phone: phone || null, p_pickup_time: S.ck.slot, p_items: items, p_notes: notes || null, p_promo_code: code || null });
+    const { data, error } = await sb.rpc('place_customer_order', { p_customer_name: name, p_customer_phone: phone, p_pickup_time: S.ck.slot, p_items: items, p_notes: notes || null, p_promo_code: code || null });
     if (error) throw error;
     localStorage.setItem('rasoi_last_order_at', String(Date.now()));
     const summary = { ...data, name, count: cartCount() };
@@ -360,7 +368,7 @@ async function placeOrder() {
     closeSheet(); showDone(summary); loadMenu(true);
   } catch (e) {
     S.submitting = false; checkoutSheet(); const msg = friendly(e); toast(msg, true);
-    if (/not enough|not available|sold out/i.test(msg)) loadMenu(true);
+    if (/not available|no longer/i.test(msg)) loadMenu(true);
     if (/ahead|opening hours|closed on/i.test(msg)) loadInfo();
   }
 }

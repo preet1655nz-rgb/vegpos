@@ -170,3 +170,6 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .pts-card .coderow input{min-height:48px;border:1.5px solid var(--line);border-radius:12px;padding:10px 14px;background:#fff;font-size:16px}
 .pts-card .coderow input:focus{border-color:var(--teal);outline:none;box-shadow:0 0 0 3px rgba(10,92,86,.15)}
 .pts-card .coderow button{min-height:48px}
+
+/* v12: required phone help / inline error */
+.f .fh{display:block;margin-top:6px;font-size:13px;color:var(--ink3)}.f .fh.err{color:var(--bad);font-weight:600}

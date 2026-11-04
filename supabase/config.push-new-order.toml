@@ -1,0 +1,2 @@
+[functions.push-new-order]
+verify_jwt = false   # authenticated by the x-push-secret shared secret (pg_net trigger)

@@ -704,3 +704,6 @@ body{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helv
 @keyframes dtDraw{to{stroke-dashoffset:0}}
 @keyframes dtOut{to{transform:scale(1.08);opacity:0}}
 @media (prefers-reduced-motion:reduce){.donetick.on .dt-card{animation:none;transform:none;opacity:1}.donetick.on .dt-k{animation:none;stroke-dashoffset:0}}
+
+/* v12: iPhone Home Screen hint for background alerts */
+.ios-hint{display:flex;gap:8px;align-items:flex-start;margin:10px 0 0;padding:10px 12px;border-radius:12px;background:#E6F4F1;color:#0A5C56;font-size:13.5px;line-height:1.4}.ios-hint b{font-weight:700}

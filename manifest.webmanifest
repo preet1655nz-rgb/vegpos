@@ -1,0 +1,16 @@
+{
+  "name": "rasoi Staff",
+  "short_name": "rasoi staff",
+  "description": "rasoi DELI + KITCHEN staff app: orders, alerts and stock",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F3F7F6",
+  "theme_color": "#0A5C56",
+  "icons": [
+    { "src": "brand/rasoi/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" },
+    { "src": "brand/rasoi/rasoi-mark-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
