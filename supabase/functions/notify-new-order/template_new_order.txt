@@ -1,8 +1,15 @@
-Template name: new_order
-Category: Utility
-Language: English (en)
+WhatsApp message template for the staff new-order alert (and for accepting it from WhatsApp)
+=======================================================================================
+Create in WhatsApp Manager → Message templates → Create template.
 
-Body (6 variables):
+Name:      new_order
+Category:  Utility
+Language:  English (en)   ← must match WHATSAPP_TEMPLATE_LANG (default "en")
+
+Header:    (none)  — optional Text header: "New order"
+
+Body (copy exactly — 6 variables, each on its own line is fine in the BODY, but the VALUES we send are single-line):
+-------------------------------------------------------------------------------------
 New pickup order {{1}} at rasoi · DELI + KITCHEN.
 
 Customer: {{2}}
@@ -11,14 +18,29 @@ Pickup: {{4}} (NZ time)
 Items: {{5}}
 Total: {{6}}, cash on pickup.
 
-Please open the rasoi staff app to accept the order.
+Tap Accept below, or reply "Accepted", to accept it in the staff app.
+-------------------------------------------------------------------------------------
+
+Footer (optional): rasoi staff app
+
+Buttons:   Quick reply  →  button text:  Accept
+           (one quick-reply button, index 0. notify-new-order fills its payload with ACCEPT:<order id>,
+            so a tap on an older message still accepts the right order.)
 
 Sample values for Meta review:
-{{1}} #29
-{{2}} Gary
-{{3}} 021 168 1559
-{{4}} Wed 4 Nov, 6:15 pm
-{{5}} 1x Veg Momos Steamed (8pcs), 1x Veg Puff Patties (3pcs)
-{{6}} $20.00
+  {{1}} #31
+  {{2}} Aroha
+  {{3}} 021 555 0123
+  {{4}} Wed 4 Nov, 6:15 pm
+  {{5}} 2x Veg Momos Steamed (8pcs), 1x Veg Puff Patties (3pcs)
+  {{6}} $30.00
 
-Footer (optional, no variables): Staff alert · rasoi DELI + KITCHEN
+How staff accept from WhatsApp (whatsapp-webhook):
+  • tap the Accept button on the alert                    → that exact order
+  • reply to the alert with "accepted" / "Accept"          → the order that alert was about
+  • send "accept 31" / "Accepted #31"                      → order #31
+  • send just "accepted" (not as a reply)                  → the newest order still waiting
+  Only the staff number saved in the app (Settings → Alerts & WhatsApp) can accept. Reply: "Order #31 accepted ✓".
+
+If Meta approves the template WITHOUT the button, set the secret WHATSAPP_TEMPLATE_ACCEPT_BUTTON=false;
+typed "accepted" replies still work.

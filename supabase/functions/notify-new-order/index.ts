@@ -15,6 +15,8 @@
 //   NOTIFY_WEBHOOK_SECRET     shared secret, same value as Vault secret "notify_new_order_secret"
 //   NOTIFY_ONLY_CUSTOMER_APP  optional "true" = only alert for Customer-app orders (default: all new orders)
 //   WHATSAPP_DRY_RUN          optional "true" = build + log the request but do not call Meta
+//   WHATSAPP_TEMPLATE_ACCEPT_BUTTON  "true" (default) when the approved template has the "Accept" quick-reply button;
+//                             set "false" if the template was approved without it (Meta rejects a button param it does not expect)
 // Provided automatically by Supabase: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 
@@ -96,7 +98,12 @@ Deno.serve(async (req) => {
     template: {
       name: env("WHATSAPP_TEMPLATE_NAME", "new_order"),
       language: { code: env("WHATSAPP_TEMPLATE_LANG", "en") },
-      components: [{ type: "body", parameters: params.map((text) => ({ type: "text", text })) }],
+      components: [
+        { type: "body", parameters: params.map((text) => ({ type: "text", text })) },
+        // quick-reply button 0 = "Accept"; the payload tells whatsapp-webhook exactly which order was accepted
+        ...(env("WHATSAPP_TEMPLATE_ACCEPT_BUTTON", "true") === "true"
+          ? [{ type: "button", sub_type: "quick_reply", index: "0", parameters: [{ type: "payload", payload: `ACCEPT:${o.id}` }] }] : []),
+      ],
     },
   };
 

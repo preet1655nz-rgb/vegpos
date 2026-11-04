@@ -1,0 +1,54 @@
+import crypto from 'node:crypto';
+const ENV = { WHATSAPP_APP_SECRET: 'appsecret', WHATSAPP_VERIFY_TOKEN: 'vt123', SUPABASE_URL: 'x', SUPABASE_SERVICE_ROLE_KEY: 'y', WHATSAPP_TOKEN: 'tok', WHATSAPP_PHONE_NUMBER_ID: '999' };
+let handler; globalThis.Deno = { env: { get: k => ENV[k] }, serve: h => { handler = h; } };
+const U = n => `00000000-0000-4000-8000-0000000000${n}`;
+const orders = [{ id: U(31), order_no: 31, status: 'pending', created_at: '2026-11-04T05:00:00Z' }, { id: U(32), order_no: 32, status: 'pending', created_at: '2026-11-04T05:10:00Z' }, { id: U(33), order_no: 33, status: 'cancelled', created_at: '2026-11-04T04:00:00Z' }];
+const log = [{ id: 1, order_id: U(31), status: 'sent', provider_message_id: 'wamid.ALERT31' }]; const rpcs = [];
+const staffNo = '021 555 0123';
+function q(t) { const f = []; let ord = null, op = 'select', payload = null;
+  const run = () => { let rows = t === 'orders' ? orders : t === 'notification_log' ? log : t === 'settings' ? [{ id: 1, staff_whatsapp: staffNo }] : [];
+    rows = rows.filter(r => f.every(([k, v, neg]) => neg ? r[k] != null : r[k] === v)); if (ord) rows = rows.slice().sort((a, b) => ord.asc ? (a[ord.k] > b[ord.k] ? 1 : -1) : (a[ord.k] < b[ord.k] ? 1 : -1)); return rows; };
+  const b = { select() { return b; }, eq(k, v) { f.push([k, v]); return b; }, not(k) { f.push([k, null, true]); return b; }, order(k, o) { ord = { k, asc: o.ascending }; return b; }, limit() { return b; },
+    maybeSingle() { return Promise.resolve({ data: run()[0] ?? null }); },
+    insert(r) { if (r.provider_message_id && ['received', 'ignored'].includes(r.status) && log.some(l => l.provider_message_id === r.provider_message_id && ['received', 'ignored'].includes(l.status))) return Promise.resolve({ error: { message: 'duplicate key' } }); log.push({ id: log.length + 1, ...r }); return Promise.resolve({ error: null }); },
+    update(p) { op = 'update'; payload = p; return b; }, then(res, rej) { if (op === 'update') run().forEach(r => Object.assign(r, payload)); return Promise.resolve({ error: null }).then(res, rej); } };
+  return b; }
+globalThis.__cc = () => ({ from: q, rpc: async (n, a) => { rpcs.push([n, a]); const o = orders.find(x => x.id === a.p_order_id); if (!o) return { data: { ok: false, result: 'not_found' } };
+  if (a.p_from !== '64215550123') return { data: { ok: false, result: 'not_staff' } };
+  if (o.status !== 'pending') return { data: { ok: true, result: o.status === 'cancelled' ? 'cancelled' : 'already', order_no: o.order_no, status: o.status } }; o.status = 'accepted'; return { data: { ok: true, result: 'accepted', order_no: o.order_no, status: 'accepted' } }; } });
+const sent = []; globalThis.fetch = async (u, o) => { sent.push(JSON.parse(o.body)); return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'wamid.R' + sent.length }] }) }; };
+const mod = await import('/tmp/wwh-test.mjs');
+const sign = s => 'sha256=' + crypto.createHmac('sha256', ENV.WHATSAPP_APP_SECRET).update(s).digest('hex');
+const post = async (msgs, sig) => { const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: 'W', changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { phone_number_id: '999' }, messages: msgs } }] }] });
+  const r = await handler(new Request('http://f/', { method: 'POST', headers: { 'x-hub-signature-256': sig ?? sign(body) }, body })); return [r.status, await r.json()]; };
+const out = (k, v) => console.log(k.padEnd(34), JSON.stringify(v));
+const get = async qs => { const r = await handler(new Request('http://f/?' + qs)); return [r.status, await r.text()]; };
+out('GET verify ok', await get('hub.mode=subscribe&hub.verify_token=vt123&hub.challenge=CH42'));
+out('GET verify bad token', await get('hub.mode=subscribe&hub.verify_token=nope&hub.challenge=CH42'));
+out('POST bad signature', (await post([{ from: '64215550123', id: 'w0', type: 'text', text: { body: 'accepted' } }], 'sha256=' + '0'.repeat(64)))[0]);
+out('POST missing signature', (await post([], ''))[0]);
+const last = () => sent.at(-1);
+let r = await post([{ from: '64215550123', id: 'w1', type: 'text', text: { body: 'Accepted' }, context: { id: 'wamid.ALERT31' } }]);
+out('text reply to alert #31 (context)', [r[1].results, last().text.body, last().to, last().context]);
+r = await post([{ from: '64215550123', id: 'w1', type: 'text', text: { body: 'Accepted' }, context: { id: 'wamid.ALERT31' } }]);
+out('same wamid retried by Meta', r[1].results);
+r = await post([{ from: '64215550123', id: 'w2', type: 'button', button: { payload: 'ACCEPT:' + U(32), text: 'Accept' }, context: { id: 'wamid.other' } }]);
+out('button payload #32', [r[1].results, last().text.body]);
+r = await post([{ from: '64215550123', id: 'w3', type: 'text', text: { body: 'accept 31' } }]);
+out('"accept 31" again', [r[1].results, last().text.body]);
+r = await post([{ from: '64215550123', id: 'w4', type: 'text', text: { body: 'ACCEPTED #33' } }]);
+out('cancelled #33', [r[1].results, last().text.body]);
+r = await post([{ from: '64215550123', id: 'w5', type: 'text', text: { body: 'accept 99' } }]);
+out('unknown #99', [r[1].results, last().text.body]);
+orders.push({ id: U(34), order_no: 34, status: 'pending', created_at: '2026-11-04T05:30:00Z' }, { id: U(35), order_no: 35, status: 'pending', created_at: '2026-11-04T05:40:00Z' });
+r = await post([{ from: '64215550123', id: 'w6', type: 'text', text: { body: 'accepted' } }]);
+out('plain "accepted" → latest pending', [r[1].results, last().text.body]);
+const n = sent.length;
+r = await post([{ from: '64211111111', id: 'w7', type: 'text', text: { body: 'accepted' } }]);
+out('NOT staff number', [r[1].results, 'replies sent:', sent.length - n, '#34 status', orders.find(o => o.order_no === 34).status]);
+r = await post([{ from: '64215550123', id: 'w8', type: 'text', text: { body: 'is the order ready? we accepted the delivery' } }]);
+out('staff chit-chat', [r[1].results, 'replies sent:', sent.length - n]);
+out('parseIntent samples', ['Accept', 'accepted!', 'Accepted ✅', 'accept order 31', 'acceptable', 'not accepted'].map(t => [t, mod.parseIntent?.({ type: 'text', text: { body: t } })?.accept]));
+out('final statuses', orders.map(o => `#${o.order_no}:${o.status}`));
+out('rpc calls', rpcs.map(([n, a]) => `${n}(${a.p_order_id.slice(-2)}, ${a.p_from})`));
+out('log statuses', log.map(l => l.status));

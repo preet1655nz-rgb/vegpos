@@ -34,3 +34,8 @@ Files
 
 Pause: `alter table public.orders disable trigger vegpos_notify_new_order;` (or delete the Vault secret value).
 Business-initiated messages need an approved template; Meta charges per utility message per its current pricing.
+
+## Two-way: accept from WhatsApp
+The template now carries a quick-reply **Accept** button (payload `ACCEPT:<order id>`) and the line
+'Tap Accept below, or reply "Accepted"'. Replies are handled by `supabase/functions/whatsapp-webhook` — see its README.
+If the template is approved without the button, set `WHATSAPP_TEMPLATE_ACCEPT_BUTTON=false`.
