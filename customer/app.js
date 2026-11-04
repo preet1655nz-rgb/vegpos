@@ -12,6 +12,10 @@ const CFG = {
   cooldownSec: 60,    // one order per device per minute
   maxQty: 50
 };
+if (typeof window.supabase === 'undefined' || !window.supabase.createClient) { // library failed to load: say so instead of showing a blank page
+  document.addEventListener('DOMContentLoaded', () => { const m = document.getElementById('menu'); if (m) { m.setAttribute('aria-busy', 'false'); m.innerHTML = '<div class="status-banner"><div><b>Online ordering couldn\'t load</b><div style="color:var(--ink2);font-size:14px">Please refresh the page, or call us to order.</div></div><button class="btn" type="button" onclick="location.reload()">Refresh</button></div>'; } });
+  throw new Error('supabase-js failed to load');
+}
 const sb = supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
 
 const $ = id => document.getElementById(id);
