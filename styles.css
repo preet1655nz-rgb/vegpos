@@ -739,3 +739,6 @@ body{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helv
 
 /* v12: iPhone Home Screen hint for background alerts */
 .ios-hint{display:flex;gap:8px;align-items:flex-start;margin:10px 0 0;padding:10px 12px;border-radius:12px;background:#E6F4F1;color:#0A5C56;font-size:13.5px;line-height:1.4}.ios-hint b{font-weight:700}
+/* v14 PDF capture: page edge is the paper; plain digits so html2canvas spaces numbers correctly */
+.receipt.rx-pdf{border-radius:0;box-shadow:none;animation:none}
+.rx-pdf,.rx-pdf *{font-variant-numeric:normal!important}

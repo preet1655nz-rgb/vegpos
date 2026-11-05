@@ -44,6 +44,7 @@ const I = {
   plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   minus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>',
   trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>',
+  share: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>',
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   alert: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></svg>',
   card: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18"/></svg>',
@@ -116,6 +117,12 @@ async function loadInfo() {
   renderInfo();
   if (S.sheet === 'checkout') checkoutSheet();
 }
+const CATERING = 'We provide catering as well — Indian veg catering.';
+function bulkCopy(note) {
+  const n = String(note || '').trim();
+  if (!n || /^bulk orders accepted\.? contact us for enquiries\.?$/i.test(n)) return 'Bulk orders accepted, and we provide catering as well — Indian veg catering. Contact us for enquiries.';
+  return /catering/i.test(n) ? n : `${n} ${CATERING}`;
+}
 function renderInfo() {
   const i = S.info || {};
   $('hours').textContent = hoursText();
@@ -130,7 +137,7 @@ function renderInfo() {
       <p class="pts-out" id="pts-out" aria-live="polite"></p></div>`;
   }
   const ph = i.contact_phone, em = i.contact_email;
-  $('bulk').innerHTML = `<div class="bulk-in"><h2 class="script">Bulk orders</h2><p>${esc(i.bulk_note || 'Bulk orders accepted. Contact us for enquiries.')}</p>
+  $('bulk').innerHTML = `<div class="bulk-in"><h2 class="script">Bulk orders &amp; catering</h2><p>${esc(bulkCopy(i.bulk_note))}</p>
     ${ph || em ? `<p class="contact">${ph ? `<a href="tel:${esc(ph.replace(/[^0-9+]/g, ''))}">${esc(ph)}</a>` : ''}${ph && em ? '<span aria-hidden="true"> · </span>' : ''}${em ? `<a href="mailto:${esc(em)}?subject=${encodeURIComponent('Bulk order enquiry')}">${esc(em)}</a>` : ''}</p>` : ''}</div>`;
 }
 
@@ -159,7 +166,7 @@ function friendly(e) {
 
 /* ---------- menu ---------- */
 function skeleton() {
-  $('chips').innerHTML = Array.from({ length: 3 }, () => '<span class="chip sk" aria-hidden="true"></span>').join('');
+  $('chips').innerHTML = ''; // single menu: no category tabs
   $('menu').innerHTML = `<div class="sec"><div class="sk" style="height:24px;width:140px;margin:10px 2px 16px"></div><div class="grid">${Array.from({ length: 4 }, () =>
     '<div class="sk-card" aria-hidden="true"><div class="sk l"></div><div class="sk l2"></div></div>').join('')}</div></div>`;
 }
@@ -189,12 +196,11 @@ function renderMenu() {
   const m = $('menu'); m.setAttribute('aria-busy', 'false');
   if (!S.menu.length) { $('chips').innerHTML = ''; m.innerHTML = '<div class="empty"><b>The menu is being updated</b>Please check back soon.</div>'; return; }
   const cs = cats();
-  $('chips').innerHTML = cs.map((c, i) => `<button class="chip ${i === 0 ? 'on' : ''}" type="button" data-a="cat" data-c="${esc(slug(c))}">${esc(c)}</button>`).join('');
-  m.innerHTML = cs.map(c => {
-    const ps = S.menu.filter(p => p.category === c);
-    return `<section class="sec" id="${esc(slug(c))}" aria-labelledby="${esc(slug(c))}-h"><h2 class="script" id="${esc(slug(c))}-h">${esc(c)}</h2><div class="grid">${ps.map(cardHTML).join('')}</div></section>`;
-  }).join('');
-  spy();
+  // v14: one menu, one section (no per-category tabs, no category scrolling). Same item order as before:
+  // grouped in the order categories first appear; product.category is left untouched in the database.
+  const ps = cs.flatMap(c => S.menu.filter(p => p.category === c));
+  $('chips').innerHTML = ''; $('chips').hidden = true;
+  m.innerHTML = `<section class="sec" id="c-menu" aria-labelledby="c-menu-h"><h2 class="script" id="c-menu-h">Menu</h2><div class="grid">${ps.map(cardHTML).join('')}</div></section>`;
 }
 function cardHTML(p, i) {
   const from = Math.min(...p.variants.map(v => v.price));
@@ -205,16 +211,9 @@ function cardHTML(p, i) {
       <span class="vs">${p.variants.map(v => `<span>${esc(v.label)} ${money(v.price)}</span>`).join('')}</span></span>
     <span class="end"><span class="from">${p.variants.length > 1 ? '<small>from</small>' : ''}${money(from)}</span><span class="add" aria-hidden="true">${I.plus}</span></span></button>`;
 }
-let spyObs;
-function spy() {
-  if (spyObs) spyObs.disconnect();
-  spyObs = new IntersectionObserver(es => {
-    for (const e of es) if (e.isIntersecting) setChip(e.target.id);
-  }, { rootMargin: '-90px 0px -65% 0px' });
-  document.querySelectorAll('.sec').forEach(s => spyObs.observe(s));
-}
+// chips never scroll the page (v14): highlight only
 function setChip(id) {
-  document.querySelectorAll('.chip').forEach(c => { const on = c.dataset.c === id; c.classList.toggle('on', on); if (on) c.setAttribute('aria-current', 'true'); else c.removeAttribute('aria-current'); if (on) c.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); });
+  document.querySelectorAll('.chip').forEach(c => { const on = c.dataset.c === id; c.classList.toggle('on', on); if (on) c.setAttribute('aria-current', 'true'); else c.removeAttribute('aria-current'); });
 }
 
 /* ---------- cart bar ---------- */
@@ -397,29 +396,99 @@ async function placeOrder() {
 }
 
 /* confirmation */
-function doneItems(o) {
-  return (o.items || []).map(i => { const k = packOf(i.label, i.pieces, i.qty), price = i.price != null ? Number(i.price) : null;
-    return `<div class="tk-it"><div class="tk-row"><b>${esc(i.name || i.label)}</b>${price != null ? `<span class="num">${money(price * i.qty)}</span>` : ''}</div>
-      <div class="tk-calc"><span class="tk-q">${esc(packNum(k.qty))} × ${esc(k.per)}</span>${price != null ? `<span class="tk-each">${money(price)} each</span>` : ''}<span class="tk-eq">= <b>${esc(k.total)}</b></span></div></div>`; }).join('');
+/* ---------- receipt PDF (v14) ----------
+   Renders the same receipt HTML/CSS as on screen into an off-screen box, captures it with html2canvas (scale 2) and
+   wraps it in a one-page jsPDF sized exactly to the receipt. Both libraries are vendored in vendor/ (no CDN) and only
+   loaded when a receipt is shown. The PDF is prepared ahead so Share can open the share sheet straight away. */
+const PDF_LIBS = ['vendor/html2canvas-1.4.1.min.js', 'vendor/jspdf-4.2.1.umd.min.js'];
+let pdfLibsP = null;
+function loadPdfLibs() {
+  if (window.html2canvas && window.jspdf) return Promise.resolve();
+  return pdfLibsP = pdfLibsP || Promise.all(PDF_LIBS.map(src => new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src + '?v=14'; s.onload = res;
+    s.onerror = () => { pdfLibsP = null; s.remove(); rej(new Error('Could not load the PDF tools. Check the connection and try again.')); };
+    document.head.appendChild(s);
+  })));
 }
+const imgsReady = root => Promise.all([...root.querySelectorAll('img')].map(im => im.complete && im.naturalWidth ? 0
+  : new Promise(r => { im.addEventListener('load', r, { once: true }); im.addEventListener('error', r, { once: true }); setTimeout(r, 5000); })));
+async function receiptPdf(html, filename, width = 380) {
+  await loadPdfLibs();
+  const box = document.createElement('div');
+  box.setAttribute('aria-hidden', 'true');
+  box.style.cssText = `position:fixed;left:-10000px;top:0;width:${width}px;background:#fff;pointer-events:none`;
+  box.innerHTML = html; document.body.appendChild(box);
+  try {
+    const el = box.firstElementChild;
+    el.classList.add('rx-pdf'); // the PDF page is the paper: square edges, no shadow
+    await imgsReady(box);
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    const c = await window.html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+    const w = el.offsetWidth * 0.75, h = el.offsetHeight * 0.75; // CSS px -> PDF pt, one page the size of the receipt
+    const pdf = new window.jspdf.jsPDF({ unit: 'pt', format: [w, h], orientation: h >= w ? 'portrait' : 'landscape', compress: true });
+    pdf.addImage(c.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, w, h);
+    pdf.setProperties({ title: filename.replace(/\.pdf$/i, ''), creator: 'rasoi' });
+    return new File([pdf.output('blob')], filename, { type: 'application/pdf' });
+  } finally { box.remove(); }
+}
+const pdfCache = new Map();
+function preparePdf(key, html, filename) {
+  let p = pdfCache.get(key);
+  if (!p) { p = receiptPdf(html, filename); p.catch(() => pdfCache.delete(key)); pdfCache.set(key, p); }
+  return p;
+}
+/* share the PDF file; returns 'shared' | 'cancelled' | 'retry' | 'downloaded' */
+async function sharePdf(file, title) {
+  if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ title, files: [file] }); return 'shared'; }
+    catch (e) {
+      if (e && e.name === 'AbortError') return 'cancelled';
+      if (e && e.name === 'NotAllowedError') return 'retry'; // tap expired while the PDF was being made; it's ready now
+    }
+  }
+  const url = URL.createObjectURL(file), a = document.createElement('a');
+  a.href = url; a.download = file.name; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60e3);
+  return 'downloaded';
+}
+
+/* confirmation: one clean receipt (same look as the staff receipt) */
+function ticketHTML(o) {
+  const d = new Date(o.pickup_time), its = o.items || [], rel = relDay(d), row = (k, v) => `<div class="rx-r"><span>${k}</span><span>${v}</span></div>`;
+  const sub = its.length ? its.reduce((a, i) => a + (i.price != null ? Number(i.price) * i.qty : 0), 0) : null;
+  const items = its.map(i => { const k = packOf(i.label, i.pieces, i.qty), price = i.price != null ? Number(i.price) : null;
+    return `<div class="rx-item"><div class="rx-it"><b>${esc(i.name || i.label)}</b>${price != null ? `<span class="rx-amt">${money(price * i.qty)}</span>` : ''}</div>
+      <div class="rx-calc"><span class="rx-q">${esc(packNum(k.qty))} × ${esc(k.per)}</span>${price != null ? `<span class="rx-each">${money(price)} each</span>` : ''}<span class="rx-eq">= <b>${esc(k.total)}</b></span></div></div>`; }).join('');
+  const placed = o.placed_at ? new Date(o.placed_at) : null;
+  return `<div class="receipt rx">
+    <div class="rx-head"><img class="rx-mark" src="brand/rasoi/rasoi-mark.png" alt="" width="548" height="548"><img class="rx-word" src="brand/rasoi/rasoi-wordmark.png" alt="rasoi deli + kitchen" width="569" height="247"></div>
+    <div class="rx-ok">${I.check}<span>Order received · we'll confirm shortly</span></div>
+    <div class="rx-title"><span>Receipt</span></div>
+    <div class="rx-no"><small>Order</small><b class="num">#${esc(o.order_no)}</b>${placed ? `<span>Placed ${esc(relDay(placed))}, ${esc(fmtTime(placed))}</span>` : ''}</div>
+    <div class="rx-sec">${o.name ? row('Customer', esc(o.name)) : ''}${row('Pickup', `<b>${esc(rel)} · ${esc(fmtTime(d))}</b>`)}${/^(Today|Tomorrow)$/.test(rel) ? row('Date', esc(fmtDayLong(d))) : ''}</div>
+    ${its.length ? `<div class="rx-sec rx-items">${items}</div>` : `<div class="rx-sec">${row('Items', esc(o.count))}</div>`}
+    <div class="rx-sec">${sub != null && Number(o.discount) ? row('Subtotal', money(sub)) : ''}${Number(o.discount) ? row(`Promo ${esc(o.promo_code || '')}`, '−' + money(o.discount)) : ''}
+      <div class="rx-total"><span>Total</span><b class="num">${money(o.total)}</b></div>
+      <div class="rx-cash">${I.cash}<div><b>Cash only · pay at pickup</b><small>Show order #${esc(o.order_no)} at the counter</small></div></div></div>
+    <div class="rx-thanks">Thank you!</div><div class="rx-foot">Pickup only · see you soon</div></div>`;
+}
+const ticketPdf = o => preparePdf(`t${o.order_no}|${o.total}`, ticketHTML(o), `rasoi-order-${o.order_no}.pdf`);
 function showDone(o) {
-  const d = new Date(o.pickup_time), el = $('done'), its = o.items && o.items.length;
-  const sub = its ? o.items.reduce((a, i) => a + (i.price != null ? Number(i.price) * i.qty : 0), 0) : null;
-  el.innerHTML = `<h2 class="script" tabindex="-1" id="done-h">Thank you!</h2>
-    <p class="lead">Thanks ${esc(o.name)}, we've received your order. We'll confirm your order shortly. Pay cash at pickup.</p>
-    <div class="ticket tk" role="group" aria-label="Order summary">
-      <div class="tk-head"><img class="tk-mark" src="brand/rasoi/rasoi-mark.png" alt="" width="548" height="548"><img class="tk-word" src="brand/rasoi/rasoi-wordmark.png" alt="rasoi deli + kitchen" width="569" height="247"></div>
-      <div class="tk-title"><span>Pickup order</span></div>
-      <div class="no">Order number</div><div class="big num">#${esc(o.order_no)}</div>
-      <div class="kv"><span>Pickup</span><b>${esc(relDay(d))} · ${esc(fmtTime(d))}<br><small>${esc(fmtDayLong(d))}</small></b></div>
-      ${its ? `<div class="tk-items">${doneItems(o)}</div>
-        ${sub != null && Number(o.discount) ? `<div class="kv"><span>Subtotal</span><b class="num">${money(sub)}</b></div>` : ''}` : `<div class="kv"><span>Items</span><b>${o.count}</b></div>`}
-      ${Number(o.discount) ? `<div class="kv"><span>Promo ${esc(o.promo_code || '')}</span><b class="num">−${money(o.discount)}</b></div>` : ''}
-      <div class="tk-total"><span>Total · cash at pickup</span><b class="num">${money(o.total)}</b></div>
-      <div class="pay">${I.cash}<span><b>Cash only · pay at pickup.</b> Please show this order number at the counter. Pickup only, no delivery.</span></div></div>
-    <div class="again"><button class="btn ghost" type="button" data-a="again">Start a new order</button></div>`;
-  el.hidden = false; document.body.classList.add('locked'); updateBar(); buzz();
+  const el = $('done'); S.done = o;
+  el.innerHTML = `<h2 class="sr" tabindex="-1" id="done-h">Thanks ${esc(o.name || '')}, order #${esc(o.order_no)} received. Pay cash at pickup.</h2>
+    ${ticketHTML(o)}
+    <div class="again"><button class="btn" type="button" data-a="sharePdf">${I.share}<span>Share receipt (PDF)</span></button><button class="btn ghost" type="button" data-a="again">Start a new order</button></div>`;
+  el.hidden = false; el.scrollTop = 0; document.body.classList.add('locked'); updateBar(); buzz();
+  ticketPdf(o).catch(() => { }); // ready before they tap Share
   setTimeout(() => $('done-h').focus({ preventScroll: true }), 50);
+}
+async function shareTicket(btn) {
+  const o = S.done; if (!o) return;
+  const lab = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin" aria-hidden="true"></span><span>Making PDF…</span>';
+  let file; try { file = await ticketPdf(o); } catch (e) { toast(e.message || 'Could not make the PDF', true); return; }
+  finally { if (btn.isConnected) { btn.disabled = false; btn.innerHTML = lab; } }
+  const r = await sharePdf(file, `rasoi · Order #${o.order_no}`);
+  if (r === 'retry') toast('Your receipt PDF is ready. Tap Share again.'); else if (r === 'downloaded') toast(`Saved ${file.name}`);
 }
 // a refresh on the thank-you screen shows the same ticket again (until "Start a new order" or 12 h after pickup)
 function restoreDone() {
@@ -433,7 +502,7 @@ document.addEventListener('click', e => {
   const t = e.target.closest('[data-a]'); if (!t || t.disabled) return;
   const a = t.dataset.a;
   if (a === 'retry') { skeleton(); loadMenu(); }
-  else if (a === 'cat') { const s = document.getElementById(t.dataset.c); if (s) { setChip(t.dataset.c); s.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }
+  else if (a === 'cat') { const s = document.getElementById(t.dataset.c); if (s) { setChip(t.dataset.c); $('menu').scrollIntoView({ behavior: 'smooth', block: 'start' }); } }
   else if (a === 'item') openItem(t.dataset.id);
   else if (a === 'close') closeSheet();
   else if (a === 'iq') { S.item.qty = Math.max(1, Math.min(CFG.maxQty, S.item.qty + +t.dataset.d)); buzz(); itemSheet(); }
@@ -446,6 +515,7 @@ document.addEventListener('click', e => {
   else if (a === 'place') placeOrder();
   else if (a === 'applycode') { S.ck.code = ($('ck-code').value || '').trim().toUpperCase(); if (!S.ck.code) return toast('Enter a promo code', true); refreshQuote(true); }
   else if (a === 'usecode') { try { navigator.clipboard && navigator.clipboard.writeText(t.dataset.code); } catch (x) { } S.ck = S.ck || {}; S.ck.code = t.dataset.code; toast(`Code ${t.dataset.code} will be applied at checkout`); }
+  else if (a === 'sharePdf') shareTicket(t);
   else if (a === 'again') { const lo = load('rasoi_last_order', null); if (lo && lo.open) { lo.open = false; save('rasoi_last_order', lo); } $('done').hidden = true; document.body.classList.remove('locked'); updateBar(); window.scrollTo({ top: 0 }); }
 });
 document.addEventListener('change', e => { if (e.target.dataset.a === 'var') { S.item.vidx = +e.target.value; itemSheet(); const r = document.querySelector('.opt input:checked'); r && r.focus(); } });

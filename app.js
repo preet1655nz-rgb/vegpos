@@ -750,10 +750,68 @@ function receiptText(o) {
     ...(o.paid && o.cash_received != null ? [`Cash received: ${money(o.cash_received)}`, `${Number(o.tip) ? 'Tip (kept)' : 'Change'}: ${money(Number(o.tip) ? o.tip : o.change_given)}`] : []),
     ...(o.notes ? ['', `Notes: ${o.notes}`] : []), '', 'Thank you!'].join('\n');
 }
+/* ---------- receipt PDF (v14) ----------
+   Renders the same receipt HTML/CSS as on screen into an off-screen box, captures it with html2canvas (scale 2) and
+   wraps it in a one-page jsPDF sized exactly to the receipt. Both libraries are vendored in vendor/ (no CDN) and only
+   loaded when a receipt is shown. The PDF is prepared ahead so Share can open the share sheet straight away. */
+const PDF_LIBS = ['vendor/html2canvas-1.4.1.min.js', 'vendor/jspdf-4.2.1.umd.min.js'];
+let pdfLibsP = null;
+function loadPdfLibs() {
+  if (window.html2canvas && window.jspdf) return Promise.resolve();
+  return pdfLibsP = pdfLibsP || Promise.all(PDF_LIBS.map(src => new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src + '?v=14'; s.onload = res;
+    s.onerror = () => { pdfLibsP = null; s.remove(); rej(new Error('Could not load the PDF tools. Check the connection and try again.')); };
+    document.head.appendChild(s);
+  })));
+}
+const imgsReady = root => Promise.all([...root.querySelectorAll('img')].map(im => im.complete && im.naturalWidth ? 0
+  : new Promise(r => { im.addEventListener('load', r, { once: true }); im.addEventListener('error', r, { once: true }); setTimeout(r, 5000); })));
+async function receiptPdf(html, filename, width = 380) {
+  await loadPdfLibs();
+  const box = document.createElement('div');
+  box.setAttribute('aria-hidden', 'true');
+  box.style.cssText = `position:fixed;left:-10000px;top:0;width:${width}px;background:#fff;pointer-events:none`;
+  box.innerHTML = html; document.body.appendChild(box);
+  try {
+    const el = box.firstElementChild;
+    el.classList.add('rx-pdf'); // the PDF page is the paper: square edges, no shadow
+    await imgsReady(box);
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    const c = await window.html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+    const w = el.offsetWidth * 0.75, h = el.offsetHeight * 0.75; // CSS px -> PDF pt, one page the size of the receipt
+    const pdf = new window.jspdf.jsPDF({ unit: 'pt', format: [w, h], orientation: h >= w ? 'portrait' : 'landscape', compress: true });
+    pdf.addImage(c.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, w, h);
+    pdf.setProperties({ title: filename.replace(/\.pdf$/i, ''), creator: 'rasoi' });
+    return new File([pdf.output('blob')], filename, { type: 'application/pdf' });
+  } finally { box.remove(); }
+}
+const pdfCache = new Map();
+function preparePdf(key, html, filename) {
+  let p = pdfCache.get(key);
+  if (!p) { p = receiptPdf(html, filename); p.catch(() => pdfCache.delete(key)); pdfCache.set(key, p); }
+  return p;
+}
+/* share the PDF file; returns 'shared' | 'cancelled' | 'retry' | 'downloaded' */
+async function sharePdf(file, title) {
+  if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ title, files: [file] }); return 'shared'; }
+    catch (e) {
+      if (e && e.name === 'AbortError') return 'cancelled';
+      if (e && e.name === 'NotAllowedError') return 'retry'; // tap expired while the PDF was being made; it's ready now
+    }
+  }
+  const url = URL.createObjectURL(file), a = document.createElement('a');
+  a.href = url; a.download = file.name; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60e3);
+  return 'downloaded';
+}
+const receiptKey = o => `${o.id}|${o.updated_at || ''}|${o.paid}|${o.total}`;
+const prepReceiptPdf = o => preparePdf(receiptKey(o), receiptHTML(o), `rasoi-order-${o.order_no}.pdf`);
 function openReceipt(id) {
   const o = S.orders.find(x => x.id === id); if (!o) return;
+  prepReceiptPdf(o).catch(() => { }); // make the PDF now so Share opens instantly
   openSheet({ title: 'Receipt', left: `<button class="btn plain" data-a="openOrder" data-id="${id}">${icon('back', 'sm')}Order</button>`, body: receiptHTML(o),
-    foot: `<div style="display:flex;gap:10px"><button class="btn lg" style="flex:1" data-a="printReceipt" data-id="${id}">${icon('print', 'sm')} Print</button><button class="btn primary lg" style="flex:1" data-a="shareReceipt" data-id="${id}">${icon('share', 'sm')} Share</button></div>` });
+    foot: `<div style="display:flex;gap:10px"><button class="btn lg" style="flex:1" data-a="printReceipt" data-id="${id}">${icon('print', 'sm')} Print</button><button class="btn primary lg" style="flex:1" data-a="shareReceipt" data-id="${id}">${icon('share', 'sm')} Share PDF</button></div>` });
 }
 
 /* ---------- New / edit order ---------- */
@@ -1489,8 +1547,10 @@ const A = {
   editOrder: el => editOrder(el.dataset.id), receipt: el => openReceipt(el.dataset.id),
   printReceipt: async el => { const o = S.orders.find(x => x.id === el.dataset.id); if (!o) return; const pa = $('print-area'); pa.innerHTML = receiptHTML(o);
     await Promise.all([...pa.querySelectorAll('img')].map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; setTimeout(r, 2500); }))); window.print(); },
-  shareReceipt: async el => { const o = S.orders.find(x => x.id === el.dataset.id), text = receiptText(o);
-    try { if (navigator.share) await navigator.share({ title: `Order #${o.order_no}`, text }); else { await navigator.clipboard.writeText(text); toast('Receipt copied'); } } catch (e) { } },
+  shareReceipt: async el => { const o = S.orders.find(x => x.id === el.dataset.id); if (!o) return;
+    let file; try { file = await busy(el, () => prepReceiptPdf(o)); } catch (e) { return; }
+    const r = await sharePdf(file, `rasoi · Order #${o.order_no}`);
+    if (r === 'retry') toast('Receipt PDF is ready. Tap Share PDF again.'); else if (r === 'downloaded') toast(`Saved ${file.name}`); },
   toggleLock: async el => { const o = S.orders.find(x => x.id === el.dataset.id); if (!o || !isOwner()) return;
     if (o.locked && !confirm(`Unlock order #${o.order_no}? It can then be edited or cancelled.`)) return;
     await busy(el, async () => { const r = await q(sb.from('orders').update({ locked: !o.locked }).eq('id', o.id).select().single()); applyRow('orders', r); toast(r.locked ? `#${r.order_no} locked` : `#${r.order_no} unlocked`); buzz(); rerender(); }); },

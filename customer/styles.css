@@ -182,20 +182,50 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .ck-it{display:flex;justify-content:space-between;gap:12px;padding:12px 0}.ck-it+.ck-it{border-top:1px solid var(--line)}
 .ck-it b{display:block}.ck-it small{display:block;color:var(--ink2);font-size:13.5px}
 .ck-r{text-align:right;white-space:nowrap}.ck-r small{color:var(--deep);font-weight:700}
-.ticket.tk{flex:none;background:#fff;padding:26px 22px 22px;border-radius:22px;box-shadow:0 14px 40px rgba(6,78,59,.14);position:relative;overflow:hidden}
-.ticket.tk::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;background:var(--teal)}
-.tk-head{display:flex;flex-direction:column;align-items:center;gap:2px}
-.tk-mark{width:84px;height:84px;object-fit:contain;animation:rise .5s var(--ease)}
-.tk-word{width:min(200px,70%);height:auto}
-.tk-title{display:flex;align-items:center;gap:12px;margin:14px 0 8px;color:var(--teal)}
-.tk-title::before,.tk-title::after{content:"";flex:1;border-top:1px solid var(--line)}
-.tk-title span{font-size:11.5px;font-weight:700;letter-spacing:.3em;text-transform:uppercase;padding-left:.3em}
-.tk-items{border-top:1.5px dashed #C9D9D4;border-bottom:1.5px dashed #C9D9D4;margin:4px 0 6px;padding:4px 0}
-.tk-it{padding:12px 0}.tk-it+.tk-it{border-top:1px solid #EEF3F1}
-.tk-row{display:flex;justify-content:space-between;gap:12px;align-items:baseline}.tk-row b{font-size:16px}.tk-row span{font-weight:700;white-space:nowrap}
-.tk-calc{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:6px;font-size:13.5px;color:var(--ink2)}
-.tk-q{background:var(--mint);color:var(--deep);font-weight:700;padding:3px 10px;border-radius:999px}
-.tk-each{color:var(--ink3)}.tk-eq{margin-left:auto;color:var(--deep)}.tk-eq b{font-weight:800}
-.tk-total{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:10px 0 4px;padding:14px;border-radius:14px;background:var(--teal);color:#fff}
-.tk-total span{font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}.tk-total b{font-size:24px;font-weight:800}
-#done-h:focus{outline:none}.done .again{flex:none}
+/* v14 confirmation receipt: same look as the staff receipt */
+.receipt{background:#fff;color:#10201D;border-radius:22px;padding:30px 24px 26px;font-size:15px;line-height:1.45;box-shadow:0 14px 40px rgba(6,78,59,.16),0 1px 0 rgba(0,0,0,.04);
+  font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;position:relative;overflow:hidden}
+.receipt::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;background:#0A5C56}
+.rx-head{display:flex;flex-direction:column;align-items:center;gap:2px;padding-top:4px}
+.rx-mark{width:84px;height:84px;object-fit:contain}
+.rx-word{width:min(210px,70%);height:auto}
+.rx-title{display:flex;align-items:center;gap:12px;margin:16px 0 4px;color:#0A5C56}
+.rx-title::before,.rx-title::after{content:"";flex:1;border-top:1px solid #D7E6E1}
+.rx-title span{font-size:11.5px;font-weight:700;letter-spacing:.32em;text-transform:uppercase;padding-left:.32em}
+.rx-no{display:flex;flex-direction:column;align-items:center;margin:6px 0 2px}
+.rx-no small{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#73817D;font-weight:600}
+.rx-no b{font-size:34px;font-weight:800;color:#0A5C56;line-height:1.1;letter-spacing:-.01em}
+.rx-no span{font-size:13px;color:#4A5A56}
+.rx-sec{border-top:1.5px dashed #C9D9D4;margin-top:16px;padding-top:14px}
+.rx-r{display:flex;justify-content:space-between;gap:14px;padding:4px 0;font-variant-numeric:tabular-nums}
+.rx-r>span:first-child{color:#4A5A56}.rx-r>span:last-child{text-align:right}
+.rx-item{padding:10px 0}.rx-item+.rx-item{border-top:1px solid #EEF3F1}
+.rx-it{display:flex;justify-content:space-between;gap:14px;align-items:baseline}
+.rx-it b{font-size:15.5px;font-weight:700}.rx-amt{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rx-calc{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:6px;font-size:13.5px;color:#4A5A56;font-variant-numeric:tabular-nums}
+.rx-q{background:#F3F8F4;color:#064E3B;font-weight:700;padding:3px 9px;border-radius:999px}
+.rx-each{color:#73817D}
+.rx-eq{margin-left:auto;color:#064E3B}.rx-eq b{font-weight:800}
+.rx-total{display:flex;justify-content:space-between;align-items:baseline;margin:10px -12px 8px;padding:12px;border-radius:14px;background:#0A5C56;color:#fff}
+.rx-total span{font-size:12px;font-weight:700;letter-spacing:.24em;text-transform:uppercase}
+.rx-total b{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+.rx-thanks{text-align:center;font-family:"Caveat",cursive;font-weight:700;font-size:32px;color:#0A5C56;margin-top:18px;line-height:1}
+.rx-foot{text-align:center;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#73817D;margin-top:4px}
+.done{background:var(--mint);padding:calc(26px + var(--sat)) 16px calc(28px + var(--sab))}
+.done .receipt{flex:none;width:min(400px,100%);text-align:left;position:relative;overflow:hidden;animation:rise .45s var(--ease)}
+.rx-ok{display:flex;align-items:center;justify-content:center;gap:8px;margin:12px auto 0;width:max-content;max-width:100%;padding:6px 14px;border-radius:999px;background:#F3F8F4;color:#064E3B;font-size:13.5px;font-weight:600}
+.rx-ok svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.rx-cash{display:flex;align-items:center;gap:12px;margin-top:4px;padding:12px 14px;border-radius:14px;background:#F3F8F4;color:#064E3B}
+.rx-cash svg{width:26px;height:26px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.rx-cash b{display:block;font-size:14.5px;font-weight:700}.rx-cash small{display:block;font-size:13px;color:#4A5A56;margin-top:1px}
+.done .again{flex:none;display:flex;flex-direction:column;gap:10px;width:min(400px,100%);margin-top:18px}
+.done .again .btn{width:100%;min-height:54px;display:flex;align-items:center;justify-content:center;gap:10px}
+.done .again .btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.done .again .btn.ghost{background:#fff}
+#done-h:focus{outline:none}
+/* v14: single menu, no tab bar; anchored scrolls never hide headings */
+.chips[hidden]{display:none}
+.menu{scroll-margin-top:12px}.bulk,.sec{scroll-margin-top:16px}
+/* v14 PDF capture: page edge is the paper; plain digits so html2canvas spaces numbers correctly */
+.receipt.rx-pdf{border-radius:0;box-shadow:none;animation:none}
+.rx-pdf,.rx-pdf *{font-variant-numeric:normal!important}

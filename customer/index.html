@@ -28,11 +28,11 @@
 <link rel="icon" type="image/png" sizes="32x32" href="brand/rasoi/favicon-32.png">
 <link rel="apple-touch-icon" href="brand/rasoi/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Inter:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="styles.css?v=13">
-<meta name="build" content="customer v13 (branded order ticket with pack × qty totals; menu labels match print; never sold out; phone required; supabase-js 2.118.0)">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="styles.css?v=14">
+<meta name="build" content="customer v14 (confirmation is one clean receipt matching staff + Share as PDF; pack × qty totals; menu labels match print; never sold out; phone required; supabase-js 2.118.0)">
 <script src="vendor/supabase-js-2.118.0.js"></script>
-<script src="app.js?v=13" defer></script>
+<script src="app.js?v=14" defer></script>
 </head>
 <body>
 <a class="skip" href="#menu">Skip to menu</a>
@@ -50,11 +50,11 @@
 </header>
 <div id="promos"></div>
 
-<nav class="chips" id="chips" aria-label="Menu categories"></nav>
+<nav class="chips" id="chips" aria-label="Menu categories" hidden></nav>
 
 <main class="menu" id="menu" tabindex="-1" aria-busy="true"></main>
 
-<section class="bulk" id="bulk" aria-label="Bulk orders"></section>
+<section class="bulk" id="bulk" aria-label="Bulk orders and catering"></section>
 
 <section class="bulk pts-card" id="points" aria-label="Loyalty points" hidden></section>
 
