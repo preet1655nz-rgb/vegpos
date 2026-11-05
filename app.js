@@ -61,6 +61,25 @@ const IC = {
 const icon = (n, c = '') => `<svg class="i ${c}" viewBox="0 0 24 24" aria-hidden="true">${IC[n] || ''}</svg>`;
 const NZD = new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD' });
 const money = v => NZD.format(Number(v) || 0);
+/* ---------- pack maths (display only) ----------
+   What one pack is and what qty packs add up to, e.g. 3 × 16 pcs = 48 pcs. The label wins because it is what the
+   customer sees ("1 plate" uses 2 stock rolls, "Half" uses 8 stock pieces); stock `pieces` is only used when the label
+   has no number and no name. Half/Full and other named sizes are counted as themselves (2 × Half = 2 Half). */
+const PACK_UNIT = { pc: 'pc', pcs: 'pc', piece: 'pc', pieces: 'pc', plate: 'plate', plates: 'plate', box: 'box', boxes: 'box' };
+const packNum = n => String(Math.round(n * 100) / 100);
+const packWord = (u, n) => !u || n === 1 || /^(g|kg|ml|l|oz|lb)$/i.test(u) ? u : /(s|x|ch|sh)$/i.test(u) ? u + 'es' : u + 's';
+function packOf(label, pieces, qty) {
+  const q = Math.max(Number(qty) || 0, 0), lab = String(label || '').trim();
+  const m = lab.match(/^(\d+(?:\.\d+)?)\s*([A-Za-z][A-Za-z ]*)?$/);
+  if (!m && lab) return { qty: q, n: 1, unit: lab, named: true, per: lab, total: `${packNum(q)} ${lab}`, text: `${packNum(q)} × ${lab} = ${packNum(q)} ${lab}` };
+  let n = 1, unit = 'pc';
+  if (m) { n = Number(m[1]); const raw = (m[2] || '').trim().toLowerCase(); unit = !raw ? 'pc' : PACK_UNIT[raw] || (/[^s]s$/.test(raw) && !/^(g|kg|ml|l|oz|lb)$/.test(raw) ? raw.slice(0, -1) : raw); }
+  else if (Number(pieces) > 0) n = Number(pieces);
+  const per = `${packNum(n)} ${packWord(unit, n)}`, total = `${packNum(n * q)} ${packWord(unit, n * q)}`;
+  return { qty: q, n, unit, named: false, per, total, text: `${packNum(q)} × ${per} = ${total}` };
+}
+const itemPack = i => packOf(i.variant, i.pieces, i.qty);
+const packLine = (k, price) => `${packNum(k.qty)} × ${k.per} (${money(price)} each) = ${k.total}`;
 const num = v => new Intl.NumberFormat('en-NZ').format(Number(v) || 0);
 const pad = n => String(n).padStart(2, '0');
 const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
@@ -353,7 +372,7 @@ function waText(o) {
     `*${BRAND.name} · ${BRAND.tagline}*`, `Order #${o.order_no}`, '',
     `Customer: ${o.customer_name || ''}`, ...(o.customer_phone ? [`Phone: ${o.customer_phone}`] : []),
     `Pickup: ${pickupLong(o.pickup_time)} (NZ time)`, '',
-    ...items.map(i => `• ${i.qty} × ${i.name}${i.variant ? ` (${i.variant})` : ''} = ${money(Number(i.price) * Number(i.qty))}`), ''];
+    ...items.map(i => `• ${i.name}: ${packLine(itemPack(i), i.price)} · ${money(Number(i.price) * Number(i.qty))}`), ''];
   if (Number(o.discount)) lines.push(`Subtotal: ${money(o.subtotal || o.total)}`, `Discount${o.promo_code ? ` (${o.promo_code})` : ''}: −${money(o.discount)}`);
   lines.push(`*Total: ${money(o.total)}*`, o.paid ? `Paid (${PAY[o.payment_method] || 'cash'})` : 'Cash on pickup');
   if (o.notes) lines.push('', `Notes: ${o.notes}`);
@@ -467,7 +486,7 @@ function renderAlert() {
   b.innerHTML = `<div class="no-top"><span class="no-ic">${icon('bell', 'sm')}</span><div class="grow"><div class="no-k">New order${isCustApp(o) ? ' · Customer app' : ''}${more > 0 ? ` · +${more} more` : ''}</div><div class="no-n">#${o.order_no} · ${esc(o.customer_name || '')}</div></div>
       <div class="no-tot num">${money(o.total)}</div></div>
     <div class="no-when">${icon('clock', 'xs')} Pickup <b>${esc(fmtDT(o.pickup_time))}</b>${o.customer_phone ? ` · ${esc(o.customer_phone)}` : ''} · ${o.paid ? 'Paid' : 'Cash on pickup'}</div>
-    <ul class="no-items">${(o.items || []).map(i => `<li><span>${i.qty} × ${esc(i.name)}${i.variant ? ` <small>${esc(i.variant)}</small>` : ''}</span><span class="num">${money(Number(i.price) * Number(i.qty))}</span></li>`).join('')}</ul>
+    <ul class="no-items">${(o.items || []).map(i => `<li><span>${i.qty} × ${esc(i.name)}${i.variant ? ` <small>${esc(i.variant)} · ${esc(itemPack(i).total)}</small>` : ''}</span><span class="num">${money(Number(i.price) * Number(i.qty))}</span></li>`).join('')}</ul>
     ${o.notes ? `<div class="no-notes">${esc(o.notes)}</div>` : ''}
     <div class="no-acts">
       ${o.status === 'pending' ? `<button class="no-btn solid" data-a="acceptAlert" data-id="${o.id}">${icon('check', 'sm')}Accept</button>` : ''}
@@ -643,7 +662,7 @@ function orderBody(o) {
     <div class="o-meta" style="justify-content:center;margin-top:8px">${chip(o.status)}${custBadge(o)}${dueTag(o)}${o.locked ? `<span class="chip tag-muted">${icon('lock', 'xs')} Locked</span>` : ''}</div></div>
     ${o.status !== 'cancelled' ? `<div class="progress">${STAGES.map((s, i) => `<div class="${i <= step ? 'on' : ''}"></div>`).join('')}</div>
     <div class="progress-l">${STAGES.map(s => `<span>${ST_LABEL[s]}</span>`).join('')}</div>` : ''}
-    <div class="form-h">Items</div><div class="list">${(o.items || []).map(i => `<div class="line"><div class="grow"><div class="t">${esc(i.name)}</div><div class="s">${esc(i.variant || '')} · ${money(i.price)} each</div></div><div class="muted num">×${i.qty}</div><div class="p">${money(i.price * i.qty)}</div></div>`).join('')}</div>
+    <div class="form-h">Items</div><div class="list">${(o.items || []).map(i => `<div class="line"><div class="grow"><div class="t">${esc(i.name)}</div><div class="s pack"><b>${esc(itemPack(i).text)}</b><br>${esc(itemPack(i).per)} per pack · ${money(i.price)} each</div></div><div class="muted num">×${i.qty}</div><div class="p">${money(i.price * i.qty)}</div></div>`).join('')}</div>
     <div class="list totals mt">
       <div class="row static"><div class="grow t">Subtotal</div><div class="end num">${money(o.subtotal || o.total)}</div></div>
       ${discRows(o)}
@@ -706,20 +725,30 @@ async function setStatus(id, s, btn) {
   rerender();
 }
 function receiptHTML(o) {
-  return `<div class="receipt"><h3>${esc(bizName())}</h3><div class="c">Order #${o.order_no} · ${fmtDT(o.created_at)}</div><hr>
-    <div class="r"><span>Customer</span><span>${esc(o.customer_name)}</span></div>${o.customer_phone ? `<div class="r"><span>Phone</span><span>${esc(o.customer_phone)}</span></div>` : ''}
-    <div class="r"><span>Pickup</span><span>${fmtDT(o.pickup_time)}</span></div><hr>
-    ${(o.items || []).map(i => `<div class="r"><span>${i.qty}× ${esc(i.name)} ${esc(i.variant || '')}</span><span>${money(i.price * i.qty)}</span></div>`).join('')}<hr>
-    <div class="r"><span>Subtotal</span><span>${money(o.subtotal || o.total)}</span></div>${Number(o.discount) ? `<div class="r"><span>Discount${o.promo_code ? ' (' + esc(o.promo_code) + ')' : ''}${Number(o.points_redeemed) ? ' · ' + num(o.points_redeemed) + ' pts' : ''}</span><span>−${money(o.discount)}</span></div>` : ''}
-    <div class="r b"><span>Total</span><span>${money(o.total)}</span></div>
-    <div class="r"><span>${o.paid ? 'Paid' : 'To pay'}</span><span>${o.payment_method ? PAY[o.payment_method] : ''}</span></div>
-    ${o.paid && o.cash_received != null ? `<div class="r"><span>Cash received</span><span>${money(o.cash_received)}</span></div><div class="r"><span>${Number(o.tip) ? 'Tip (kept)' : 'Change'}</span><span>${money(Number(o.tip) ? o.tip : o.change_given)}</span></div>` : ''}
-    ${o.notes ? `<hr><div>${esc(o.notes)}</div>` : ''}<hr><div class="c">Thank you!</div></div>`;
+  const row = (k, v, cls = '') => `<div class="rx-r ${cls}"><span>${k}</span><span>${v}</span></div>`;
+  const items = (o.items || []).map(i => { const k = itemPack(i);
+    return `<div class="rx-item"><div class="rx-it"><b>${esc(i.name)}</b><span class="rx-amt">${money(i.price * i.qty)}</span></div>
+      <div class="rx-calc"><span class="rx-q">${esc(packNum(k.qty))} × ${esc(k.per)}</span><span class="rx-each">${money(i.price)} each</span><span class="rx-eq">= <b>${esc(k.total)}</b></span></div></div>`; }).join('');
+  return `<div class="receipt rx">
+    <div class="rx-head"><img class="rx-mark" src="${BRAND.logo}" alt="" width="548" height="548"><img class="rx-word" src="${BRAND.word}" alt="${esc(bizName())} · deli + kitchen" width="569" height="247"></div>
+    <div class="rx-title"><span>Receipt</span></div>
+    <div class="rx-no"><small>Order</small><b class="num">#${o.order_no}</b><span>${fmtDT(o.created_at)}</span></div>
+    <div class="rx-sec">${row('Customer', esc(o.customer_name))}${o.customer_phone ? row('Phone', esc(o.customer_phone)) : ''}${row('Pickup', `<b>${fmtDT(o.pickup_time)}</b>`)}</div>
+    <div class="rx-sec rx-items">${items}</div>
+    <div class="rx-sec">${row('Subtotal', money(o.subtotal || o.total))}${Number(o.discount) ? row(`Discount${o.promo_code ? ' (' + esc(o.promo_code) + ')' : ''}${Number(o.points_redeemed) ? ' · ' + num(o.points_redeemed) + ' pts' : ''}`, '−' + money(o.discount)) : ''}
+      <div class="rx-total"><span>Total</span><b class="num">${money(o.total)}</b></div>
+      ${row(o.paid ? 'Paid' : 'To pay', o.payment_method ? PAY[o.payment_method] : '')}
+      ${o.paid && o.cash_received != null ? row('Cash received', money(o.cash_received)) + row(Number(o.tip) ? 'Tip (kept)' : 'Change', money(Number(o.tip) ? o.tip : o.change_given)) : ''}</div>
+    ${o.notes ? `<div class="rx-sec rx-notes"><small>Notes</small><div>${esc(o.notes)}</div></div>` : ''}
+    <div class="rx-thanks">Thank you!</div><div class="rx-foot">Pickup only · see you soon</div></div>`;
 }
 function receiptText(o) {
-  return [`${bizName()} — Order #${o.order_no}`, `Customer: ${o.customer_name}`, `Pickup: ${fmtDT(o.pickup_time)}`, '',
-    ...(o.items || []).map(i => `${i.qty}× ${i.name} ${i.variant || ''} — ${money(i.price * i.qty)}`), '',
-    ...(Number(o.discount) ? [`Discount: −${money(o.discount)}`] : []), `Total: ${money(o.total)}`, `${o.paid ? 'Paid' : 'To pay'}${o.payment_method ? ' (' + PAY[o.payment_method] + ')' : ''}`].join('\n');
+  return [`${bizName()} · ${BRAND.tagline}`, `Order #${o.order_no}`, `Customer: ${o.customer_name}`, ...(o.customer_phone ? [`Phone: ${o.customer_phone}`] : []), `Pickup: ${fmtDT(o.pickup_time)}`, '',
+    ...(o.items || []).map(i => `${i.name}: ${packLine(itemPack(i), i.price)} — ${money(i.price * i.qty)}`), '',
+    `Subtotal: ${money(o.subtotal || o.total)}`, ...(Number(o.discount) ? [`Discount: −${money(o.discount)}`] : []), `Total: ${money(o.total)}`,
+    `${o.paid ? 'Paid' : 'To pay'}${o.payment_method ? ' (' + PAY[o.payment_method] + ')' : ''}`,
+    ...(o.paid && o.cash_received != null ? [`Cash received: ${money(o.cash_received)}`, `${Number(o.tip) ? 'Tip (kept)' : 'Change'}: ${money(Number(o.tip) ? o.tip : o.change_given)}`] : []),
+    ...(o.notes ? ['', `Notes: ${o.notes}`] : []), '', 'Thank you!'].join('\n');
 }
 function openReceipt(id) {
   const o = S.orders.find(x => x.id === id); if (!o) return;
@@ -768,7 +797,7 @@ function placeBtn() {
 }
 function cartHTML() {
   const c = S.cart;
-  const lines = c.items.length ? c.items.map((i, ix) => `<div class="line"><div class="grow"><div class="t">${esc(i.name)}</div><div class="s">${esc(i.variant)} · ${money(i.price)}</div></div>
+  const lines = c.items.length ? c.items.map((i, ix) => `<div class="line"><div class="grow"><div class="t">${esc(i.name)}</div><div class="s">${esc(i.variant)} · ${money(i.price)} · <b>${esc(itemPack(i).text)}</b></div></div>
     <div class="stepper"><button data-a="qty" data-i="${ix}" data-d="-1" aria-label="Less">${icon('minus', 'xs')}</button><span>${i.qty}</span><button data-a="qty" data-i="${ix}" data-d="1" aria-label="More">${icon('plus', 'xs')}</button></div>
     <div class="p">${money(i.price * i.qty)}</div></div>`).join('') : `<div class="empty" style="padding:24px">${icon('bag')}<b>No items yet</b>Tap a size on the menu.</div>`;
   const pay = ['cash', 'card', 'online'].map(k => `<button class="${c.payment === k ? 'on' : ''}" data-a="pay" data-k="${k}">${PAY[k]}</button>`).join('');
@@ -1458,7 +1487,8 @@ const A = {
   cancelOrder: el => setStatus(el.dataset.id, 'cancelled', el),
   setStatus: el => setStatus(el.dataset.id, el.dataset.s, el),
   editOrder: el => editOrder(el.dataset.id), receipt: el => openReceipt(el.dataset.id),
-  printReceipt: el => { const o = S.orders.find(x => x.id === el.dataset.id); $('print-area').innerHTML = receiptHTML(o); window.print(); },
+  printReceipt: async el => { const o = S.orders.find(x => x.id === el.dataset.id); if (!o) return; const pa = $('print-area'); pa.innerHTML = receiptHTML(o);
+    await Promise.all([...pa.querySelectorAll('img')].map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; setTimeout(r, 2500); }))); window.print(); },
   shareReceipt: async el => { const o = S.orders.find(x => x.id === el.dataset.id), text = receiptText(o);
     try { if (navigator.share) await navigator.share({ title: `Order #${o.order_no}`, text }); else { await navigator.clipboard.writeText(text); toast('Receipt copied'); } } catch (e) { } },
   toggleLock: async el => { const o = S.orders.find(x => x.id === el.dataset.id); if (!o || !isOwner()) return;

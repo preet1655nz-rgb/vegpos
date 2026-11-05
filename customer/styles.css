@@ -173,3 +173,29 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 
 /* v12: required phone help / inline error */
 .f .fh{display:block;margin-top:6px;font-size:13px;color:var(--ink3)}.f .fh.err{color:var(--bad);font-weight:600}
+
+/* v13: pack maths (3 × 16 pcs = 48 pcs) on item sheet, cart, checkout and the branded order ticket */
+.pk-tot{color:var(--deep);font-weight:700}
+.ln .pk{display:inline-block;margin-top:4px;font-size:13px;font-weight:700;color:var(--deep);background:var(--mint);padding:3px 10px;border-radius:999px}
+.f>.fl{display:block;font-weight:700;margin-bottom:6px}
+.ck-items{border:1px solid var(--line);border-radius:14px;background:var(--cream);padding:2px 14px}
+.ck-it{display:flex;justify-content:space-between;gap:12px;padding:12px 0}.ck-it+.ck-it{border-top:1px solid var(--line)}
+.ck-it b{display:block}.ck-it small{display:block;color:var(--ink2);font-size:13.5px}
+.ck-r{text-align:right;white-space:nowrap}.ck-r small{color:var(--deep);font-weight:700}
+.ticket.tk{flex:none;background:#fff;padding:26px 22px 22px;border-radius:22px;box-shadow:0 14px 40px rgba(6,78,59,.14);position:relative;overflow:hidden}
+.ticket.tk::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;background:var(--teal)}
+.tk-head{display:flex;flex-direction:column;align-items:center;gap:2px}
+.tk-mark{width:84px;height:84px;object-fit:contain;animation:rise .5s var(--ease)}
+.tk-word{width:min(200px,70%);height:auto}
+.tk-title{display:flex;align-items:center;gap:12px;margin:14px 0 8px;color:var(--teal)}
+.tk-title::before,.tk-title::after{content:"";flex:1;border-top:1px solid var(--line)}
+.tk-title span{font-size:11.5px;font-weight:700;letter-spacing:.3em;text-transform:uppercase;padding-left:.3em}
+.tk-items{border-top:1.5px dashed #C9D9D4;border-bottom:1.5px dashed #C9D9D4;margin:4px 0 6px;padding:4px 0}
+.tk-it{padding:12px 0}.tk-it+.tk-it{border-top:1px solid #EEF3F1}
+.tk-row{display:flex;justify-content:space-between;gap:12px;align-items:baseline}.tk-row b{font-size:16px}.tk-row span{font-weight:700;white-space:nowrap}
+.tk-calc{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:6px;font-size:13.5px;color:var(--ink2)}
+.tk-q{background:var(--mint);color:var(--deep);font-weight:700;padding:3px 10px;border-radius:999px}
+.tk-each{color:var(--ink3)}.tk-eq{margin-left:auto;color:var(--deep)}.tk-eq b{font-weight:800}
+.tk-total{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:10px 0 4px;padding:14px;border-radius:14px;background:var(--teal);color:#fff}
+.tk-total span{font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}.tk-total b{font-size:24px;font-weight:800}
+#done-h:focus{outline:none}.done .again{flex:none}

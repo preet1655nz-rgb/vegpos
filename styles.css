@@ -305,18 +305,50 @@ body.has-cart .main{padding-bottom:calc(var(--tab-h) + var(--sab) + 100px)}
 .toast.err{color:var(--red)}
 
 /* ---------- Receipt / print ---------- */
-.receipt{background:#fff;color:#000;border-radius:var(--r);padding:22px 20px;font-size:14.5px;box-shadow:var(--shadow)}
-.receipt h3{text-align:center;margin:0;font-size:19px}
-.receipt .c{text-align:center;color:#555;font-size:13px}
-.receipt hr{border:0;border-top:1px dashed #bbb;margin:12px 0}
-.receipt .r{display:flex;justify-content:space-between;gap:12px;font-variant-numeric:tabular-nums;padding:2px 0}
-.receipt .r.b{font-weight:700;font-size:16px}
+/* paper is plain white so the logo crops (on the original white background) sit on it seamlessly */
+.receipt{background:#fff;color:#10201D;border-radius:22px;padding:30px 24px 26px;font-size:15px;line-height:1.45;box-shadow:0 14px 40px rgba(6,78,59,.16),0 1px 0 rgba(0,0,0,.04);
+  font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;position:relative;overflow:hidden}
+.receipt::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;background:#0A5C56}
+.rx-head{display:flex;flex-direction:column;align-items:center;gap:2px;padding-top:4px}
+.rx-mark{width:84px;height:84px;object-fit:contain}
+.rx-word{width:min(210px,70%);height:auto}
+.rx-title{display:flex;align-items:center;gap:12px;margin:16px 0 4px;color:#0A5C56}
+.rx-title::before,.rx-title::after{content:"";flex:1;border-top:1px solid #D7E6E1}
+.rx-title span{font-size:11.5px;font-weight:700;letter-spacing:.32em;text-transform:uppercase;padding-left:.32em}
+.rx-no{display:flex;flex-direction:column;align-items:center;margin:6px 0 2px}
+.rx-no small{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#73817D;font-weight:600}
+.rx-no b{font-size:34px;font-weight:800;color:#0A5C56;line-height:1.1;letter-spacing:-.01em}
+.rx-no span{font-size:13px;color:#4A5A56}
+.rx-sec{border-top:1.5px dashed #C9D9D4;margin-top:16px;padding-top:14px}
+.rx-r{display:flex;justify-content:space-between;gap:14px;padding:4px 0;font-variant-numeric:tabular-nums}
+.rx-r>span:first-child{color:#4A5A56}.rx-r>span:last-child{text-align:right}
+.rx-item{padding:10px 0}.rx-item+.rx-item{border-top:1px solid #EEF3F1}
+.rx-it{display:flex;justify-content:space-between;gap:14px;align-items:baseline}
+.rx-it b{font-size:15.5px;font-weight:700}.rx-amt{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rx-calc{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:6px;font-size:13.5px;color:#4A5A56;font-variant-numeric:tabular-nums}
+.rx-q{background:#F3F8F4;color:#064E3B;font-weight:700;padding:3px 9px;border-radius:999px}
+.rx-each{color:#73817D}
+.rx-eq{margin-left:auto;color:#064E3B}.rx-eq b{font-weight:800}
+.rx-total{display:flex;justify-content:space-between;align-items:baseline;margin:10px -12px 8px;padding:12px;border-radius:14px;background:#0A5C56;color:#fff}
+.rx-total span{font-size:12px;font-weight:700;letter-spacing:.24em;text-transform:uppercase}
+.rx-total b{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+.rx-notes small{display:block;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#73817D;font-weight:600;margin-bottom:4px}
+.rx-notes div{white-space:pre-wrap;background:#FBFAF5;border-radius:10px;padding:10px 12px}
+.rx-thanks{text-align:center;font-family:"Caveat",cursive;font-weight:700;font-size:32px;color:#0A5C56;margin-top:18px;line-height:1}
+.rx-foot{text-align:center;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#73817D;margin-top:4px}
+.line .s.pack b{color:var(--text);font-weight:700}
 #print-area{display:none}
 @media print{
+  @page{margin:4mm}
   body *{visibility:hidden!important}
   #print-area,#print-area *{visibility:visible!important}
-  #print-area{display:block;position:absolute;left:0;top:0;width:80mm}
-  #print-area .receipt{box-shadow:none;padding:0}
+  #print-area{display:block;position:absolute;left:0;top:0;width:76mm}
+  #print-area .receipt{box-shadow:none;border-radius:0;padding:0 0 4mm;font-size:12px}
+  #print-area .receipt::before{display:none}
+  #print-area .rx-mark{width:22mm;height:22mm}#print-area .rx-word{width:44mm}
+  #print-area .rx-total{margin:8px 0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #print-area .rx-q{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #print-area .rx-calc{font-size:11.5px}
 }
 .muted{color:var(--text2)}.small{font-size:13px}.right{text-align:right}.mt{margin-top:14px}.mt2{margin-top:24px}
 .spin{width:22px;height:22px;border-radius:50%;border:2.5px solid var(--fill);border-top-color:var(--accent);animation:sp .8s linear infinite;margin:40px auto}

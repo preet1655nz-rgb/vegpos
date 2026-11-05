@@ -21,6 +21,25 @@ const sb = supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: fal
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = n => '$' + Number(n || 0).toFixed(2);
+/* ---------- pack maths (display only) ----------
+   What one pack is and what qty packs add up to, e.g. 3 × 16 pcs = 48 pcs. The label wins because it is what the
+   customer sees ("1 plate" uses 2 stock rolls, "Half" uses 8 stock pieces); stock `pieces` is only used when the label
+   has no number and no name. Half/Full and other named sizes are counted as themselves (2 × Half = 2 Half). */
+const PACK_UNIT = { pc: 'pc', pcs: 'pc', piece: 'pc', pieces: 'pc', plate: 'plate', plates: 'plate', box: 'box', boxes: 'box' };
+const packNum = n => String(Math.round(n * 100) / 100);
+const packWord = (u, n) => !u || n === 1 || /^(g|kg|ml|l|oz|lb)$/i.test(u) ? u : /(s|x|ch|sh)$/i.test(u) ? u + 'es' : u + 's';
+function packOf(label, pieces, qty) {
+  const q = Math.max(Number(qty) || 0, 0), lab = String(label || '').trim();
+  const m = lab.match(/^(\d+(?:\.\d+)?)\s*([A-Za-z][A-Za-z ]*)?$/);
+  if (!m && lab) return { qty: q, n: 1, unit: lab, named: true, per: lab, total: `${packNum(q)} ${lab}`, text: `${packNum(q)} × ${lab} = ${packNum(q)} ${lab}` };
+  let n = 1, unit = 'pc';
+  if (m) { n = Number(m[1]); const raw = (m[2] || '').trim().toLowerCase(); unit = !raw ? 'pc' : PACK_UNIT[raw] || (/[^s]s$/.test(raw) && !/^(g|kg|ml|l|oz|lb)$/.test(raw) ? raw.slice(0, -1) : raw); }
+  else if (Number(pieces) > 0) n = Number(pieces);
+  const per = `${packNum(n)} ${packWord(unit, n)}`, total = `${packNum(n * q)} ${packWord(unit, n * q)}`;
+  return { qty: q, n, unit, named: false, per, total, text: `${packNum(q)} × ${per} = ${total}` };
+}
+const linePack = l => { const v = lineVar(l); return packOf(l.label, v && v.pieces, l.qty); };
+const packLine = (k, price) => `${packNum(k.qty)} × ${k.per} (${money(price)} each) = ${k.total}`;
 const I = {
   plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   minus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>',
@@ -251,7 +270,7 @@ function itemSheet() {
     <div class="opts" role="radiogroup" aria-labelledby="opt-h">${p.variants.map(x => `<label class="opt ${x.index === S.item.vidx ? 'on' : ''}">
       <input type="radio" name="var" value="${x.index}" ${x.index === S.item.vidx ? 'checked' : ''} data-a="var">
       <span class="rd" aria-hidden="true"></span><span class="ol">${esc(x.label)}</span><span class="op">${money(x.price)}</span></label>`).join('')}</div>
-    <div class="sh-h">Quantity</div><div class="qtyrow">${stepper(S.item.qty, 1, CFG.maxQty, 'iq')}<span style="color:var(--ink2);font-size:14px">${sel ? `${money(sel.price)} each` : ''}</span></div>`;
+    <div class="sh-h">Quantity</div><div class="qtyrow">${stepper(S.item.qty, 1, CFG.maxQty, 'iq')}<span style="color:var(--ink2);font-size:14px">${sel ? `${money(sel.price)} each<br><b class="pk-tot">${esc(packOf(sel.label, sel.pieces, S.item.qty).text)}</b>` : ''}</span></div>`;
   $('sheet-foot').innerHTML = `<button class="btn split" type="button" data-a="addItem" ${sel ? '' : 'disabled'}><span>Add ${S.item.qty} to cart</span><span class="num">${sel ? money(sel.price * S.item.qty) : ''}</span></button>`;
 }
 function addItem() {
@@ -271,7 +290,7 @@ function cartSheet() {
   }
   $('sheet-body').innerHTML = `<h2 class="sh-title" id="sh-title">Your cart</h2><p class="sh-sub">Pickup order · rasoi deli + kitchen</p>
     <div class="lines">${S.cart.map((l, i) => { const p = prod(l.pid), v = lineVar(l); return `<div class="line">
-      <div class="ln"><b>${esc(p.name)}</b><small>${esc(v.label)} · ${money(v.price)} each</small><div class="lp">${money(v.price * l.qty)}</div></div>
+      <div class="ln"><b>${esc(p.name)}</b><small>${esc(v.label)} · ${money(v.price)} each</small><span class="pk">${esc(linePack(l).text)}</span><div class="lp">${money(v.price * l.qty)}</div></div>
       ${stepper(l.qty, 0, CFG.maxQty, 'lq', `data-i="${i}"`, `Quantity of ${esc(p.name)} ${esc(v.label)}`)}</div>`; }).join('')}</div>
     <button class="linkbtn" type="button" data-a="close" style="margin-top:8px">+ Add more items</button>
     <div class="totals"><div><span>Subtotal</span><span class="num">${money(cartTotal())}</span></div><div class="g"><span>Total</span><span class="num">${money(cartTotal())}</span></div></div>
@@ -328,6 +347,8 @@ function checkoutSheet() {
         : '<div class="note">No pickup times are available right now.</div>'}</div>
       <div class="f"><label for="ck-code">Promo code <small>(optional)</small></label><div class="coderow"><input id="ck-code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="24" value="${esc(S.ck.code || '')}" placeholder="e.g. WELCOME10"><button class="btn ghost sm" type="button" data-a="applycode">Apply</button></div></div>
       <div class="f"><label for="ck-notes">Notes <small>(optional)</small></label><textarea id="ck-notes" name="notes" maxlength="300" placeholder="Allergies, extra chutney, etc.">${esc(S.ck.notes || '')}</textarea></div>
+      <div class="f"><span class="fl">Your order</span><div class="ck-items">${S.cart.map(l => { const p = prod(l.pid), v = lineVar(l); if (!p || !v) return ''; const k = linePack(l);
+        return `<div class="ck-it"><div><b>${esc(p.name)}</b><small>${esc(packNum(k.qty))} × ${esc(k.per)} · ${money(v.price)} each</small></div><div class="ck-r"><b class="num">${money(v.price * l.qty)}</b><small>= ${esc(k.total)}</small></div></div>`; }).join('')}</div></div>
       <div id="quote" aria-live="polite">${quoteHTML()}</div>
       <div class="note">${I.cash}<span><b>Cash only · pay at pickup.</b> We'll confirm your order shortly. Pickup only, no delivery.</span></div>
     </form>`;
@@ -362,7 +383,9 @@ async function placeOrder() {
     const { data, error } = await sb.rpc('place_customer_order', { p_customer_name: name, p_customer_phone: phone, p_pickup_time: S.ck.slot, p_items: items, p_notes: notes || null, p_promo_code: code || null });
     if (error) throw error;
     localStorage.setItem('rasoi_last_order_at', String(Date.now()));
-    const summary = { ...data, name, count: cartCount() };
+    const lines = S.cart.map(l => { const p = prod(l.pid), v = lineVar(l), k = linePack(l);
+      return { pid: l.pid, label: l.label, qty: l.qty, name: p ? p.name : '', price: v ? v.price : null, pieces: v && v.pieces != null ? Number(v.pieces) : null, per: k.per, total: k.total }; });
+    const summary = { ...data, name, count: cartCount(), items: lines, placed_at: new Date().toISOString(), open: true };
     save('rasoi_last_order', summary);
     S.cart = []; saveCart(); S.ck = null; S.quote = null; S.submitting = false;
     closeSheet(); showDone(summary); loadMenu(true);
@@ -374,19 +397,35 @@ async function placeOrder() {
 }
 
 /* confirmation */
+function doneItems(o) {
+  return (o.items || []).map(i => { const k = packOf(i.label, i.pieces, i.qty), price = i.price != null ? Number(i.price) : null;
+    return `<div class="tk-it"><div class="tk-row"><b>${esc(i.name || i.label)}</b>${price != null ? `<span class="num">${money(price * i.qty)}</span>` : ''}</div>
+      <div class="tk-calc"><span class="tk-q">${esc(packNum(k.qty))} × ${esc(k.per)}</span>${price != null ? `<span class="tk-each">${money(price)} each</span>` : ''}<span class="tk-eq">= <b>${esc(k.total)}</b></span></div></div>`; }).join('');
+}
 function showDone(o) {
-  const d = new Date(o.pickup_time), el = $('done');
-  el.innerHTML = `<img class="done-logo" src="brand/rasoi/rasoi-mark.png" alt="" width="96" height="96"><h2 class="script" tabindex="-1" id="done-h">Thank you!</h2>
+  const d = new Date(o.pickup_time), el = $('done'), its = o.items && o.items.length;
+  const sub = its ? o.items.reduce((a, i) => a + (i.price != null ? Number(i.price) * i.qty : 0), 0) : null;
+  el.innerHTML = `<h2 class="script" tabindex="-1" id="done-h">Thank you!</h2>
     <p class="lead">Thanks ${esc(o.name)}, we've received your order. We'll confirm your order shortly. Pay cash at pickup.</p>
-    <div class="ticket" role="group" aria-label="Order summary"><div class="no">Order number</div><div class="big num">#${esc(o.order_no)}</div>
+    <div class="ticket tk" role="group" aria-label="Order summary">
+      <div class="tk-head"><img class="tk-mark" src="brand/rasoi/rasoi-mark.png" alt="" width="548" height="548"><img class="tk-word" src="brand/rasoi/rasoi-wordmark.png" alt="rasoi deli + kitchen" width="569" height="247"></div>
+      <div class="tk-title"><span>Pickup order</span></div>
+      <div class="no">Order number</div><div class="big num">#${esc(o.order_no)}</div>
       <div class="kv"><span>Pickup</span><b>${esc(relDay(d))} · ${esc(fmtTime(d))}<br><small>${esc(fmtDayLong(d))}</small></b></div>
-      <div class="kv"><span>Items</span><b>${o.count}</b></div>
+      ${its ? `<div class="tk-items">${doneItems(o)}</div>
+        ${sub != null && Number(o.discount) ? `<div class="kv"><span>Subtotal</span><b class="num">${money(sub)}</b></div>` : ''}` : `<div class="kv"><span>Items</span><b>${o.count}</b></div>`}
       ${Number(o.discount) ? `<div class="kv"><span>Promo ${esc(o.promo_code || '')}</span><b class="num">−${money(o.discount)}</b></div>` : ''}
-      <div class="kv"><span>Total</span><b class="num big2">${money(o.total)}</b></div>
+      <div class="tk-total"><span>Total · cash at pickup</span><b class="num">${money(o.total)}</b></div>
       <div class="pay">${I.cash}<span><b>Cash only · pay at pickup.</b> Please show this order number at the counter. Pickup only, no delivery.</span></div></div>
     <div class="again"><button class="btn ghost" type="button" data-a="again">Start a new order</button></div>`;
   el.hidden = false; document.body.classList.add('locked'); updateBar(); buzz();
   setTimeout(() => $('done-h').focus({ preventScroll: true }), 50);
+}
+// a refresh on the thank-you screen shows the same ticket again (until "Start a new order" or 12 h after pickup)
+function restoreDone() {
+  const o = load('rasoi_last_order', null);
+  if (!o || !o.open || !o.order_no || !o.pickup_time || Date.now() > new Date(o.pickup_time).getTime() + 12 * 36e5) return;
+  showDone(o);
 }
 
 /* ---------- events ---------- */
@@ -407,7 +446,7 @@ document.addEventListener('click', e => {
   else if (a === 'place') placeOrder();
   else if (a === 'applycode') { S.ck.code = ($('ck-code').value || '').trim().toUpperCase(); if (!S.ck.code) return toast('Enter a promo code', true); refreshQuote(true); }
   else if (a === 'usecode') { try { navigator.clipboard && navigator.clipboard.writeText(t.dataset.code); } catch (x) { } S.ck = S.ck || {}; S.ck.code = t.dataset.code; toast(`Code ${t.dataset.code} will be applied at checkout`); }
-  else if (a === 'again') { $('done').hidden = true; document.body.classList.remove('locked'); updateBar(); window.scrollTo({ top: 0 }); }
+  else if (a === 'again') { const lo = load('rasoi_last_order', null); if (lo && lo.open) { lo.open = false; save('rasoi_last_order', lo); } $('done').hidden = true; document.body.classList.remove('locked'); updateBar(); window.scrollTo({ top: 0 }); }
 });
 document.addEventListener('change', e => { if (e.target.dataset.a === 'var') { S.item.vidx = +e.target.value; itemSheet(); const r = document.querySelector('.opt input:checked'); r && r.focus(); } });
 $('cartbar').addEventListener('click', () => openSheet('cart'));
@@ -444,5 +483,5 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && S.
 setInterval(() => { if (!document.hidden && !S.submitting) loadMenu(true); }, 60e3);
 setInterval(() => { if (S.sheet === 'checkout' && !S.submitting) { const y = $('sheet-body').scrollTop; checkoutSheet(); $('sheet-body').scrollTop = y; } }, 5 * 60e3);
 
-renderInfo(); skeleton(); updateBar(); loadInfo(); loadMenu();
+renderInfo(); skeleton(); updateBar(); loadInfo(); loadMenu(); restoreDone();
 setInterval(() => { if (!document.hidden) loadInfo(); }, 5 * 60e3);
